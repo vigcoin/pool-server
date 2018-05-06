@@ -5,6 +5,7 @@ import { Logger } from '@vigcoin/logger';
 import { Handler } from './socket-handler';
 
 import { RingBuffer } from "./ring-buffer";
+import { BlockTemplate } from "./block-template";
 import { v1 } from "uuid";
 
 export class Miner {
@@ -103,8 +104,14 @@ export class Miner {
     return hex;
   }
 
+  pushMessage(method, params) {
+    this.handler.sendMessage(method, params);
+  };
+
+
   getJob() {
-    const { score, diffHex, difficulty, lastBlockHeight, pendingDifficulty, currentBlockTemplate } = this.attributes;
+    const { score, diffHex, difficulty, lastBlockHeight, pendingDifficulty } = this.attributes;
+    const currentBlockTemplate = BlockTemplate.currentBlockTemplate;
 
     if (lastBlockHeight === currentBlockTemplate.height && !pendingDifficulty) {
       return {
@@ -140,7 +147,7 @@ export class Miner {
     };
   }
 
-  isValidJob(jobId:string) {
+  isValidJob(jobId: string) {
     const jobs = this.validJobs.filter(function (job: any) {
       return job.id === jobId;
     });
@@ -165,7 +172,7 @@ export class Miner {
         this.logger.append('warn', 'pool', 'Banned %s@%s', [login, ip]);
         Handler.banned[ip] = Date.now();
         delete Handler.connectedMiners[id];
-        // process.send({ type: 'banIP', ip: this.ip });
+        process.send({ type: 'banIP', ip });
       }
       else {
         stats.invalidShares = 0;

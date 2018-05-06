@@ -15,6 +15,7 @@ import { v1 } from "uuid";
 import * as bignum from "bignum";
 
 import { BlockTemplate } from './block-template';
+import { MiningServer } from './server';
 
 
 const noncePattern = new RegExp("^[0-9A-Fa-f]{8}$");
@@ -22,8 +23,8 @@ const noncePattern = new RegExp("^[0-9A-Fa-f]{8}$");
 let scoreTime: any;
 let lastChecked = 0;
 
-let currentBlockTemplate: any;
-let validBlockTemplates: any = [];
+// let currentBlockTemplate: any;
+// let validBlockTemplates: any = [];
 const diff1 = bignum('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16);
 
 
@@ -45,13 +46,6 @@ export class Handler {
 
 
   public static httpResponse = ' 200 OK\nContent-Type: text/plain\nContent-Length: 20\n\nmining server online';
-
-  public static perIPStats: any = {};
-
-  public static banned: any = {};
-  public static connectedMiners: any = {};
-
-
 
   constructor(config: any, port: number, difficulty: number, socket: Socket, logger: Logger, req: PoolRequest, redis: RedisClient) {
     this.shareTrustEnabled = config.poolServer.shareTrust && config.poolServer.shareTrust.enabled;
@@ -139,22 +133,6 @@ export class Handler {
     this.socket.write(sendData);
   }
 
-  isBanned(ip: string) {
-    if (!Handler.banned[ip]) return false;
-
-    const bannedTime = Handler.banned[ip];
-    const bannedTimeAgo = Date.now() - bannedTime;
-    const timeLeft = this.config.poolServer.banning.time * 1000 - bannedTimeAgo;
-    if (timeLeft > 0) {
-      return true;
-    }
-    else {
-      delete Handler.banned[ip];
-      this.logger.append('info', this.logName, 'Ban dropped for %s', [ip]);
-      return false;
-    }
-  }
-
   onLogin(json: any, params: any) {
     let login = params.login;
     if (!login) {
@@ -192,7 +170,7 @@ export class Handler {
       }
     }
     let { varDiff, banning } = this.config.poolServer;
-    var variance = varDiff.variancePercent / 100 * varDiff.targetTime;
+    const variance = varDiff.variancePercent / 100 * varDiff.targetTime;
     let varDiffNew = {
       variance: variance,
       bufferSize: varDiff.retargetTime / varDiff.targetTime * 4,
@@ -201,16 +179,16 @@ export class Handler {
       maxJump: varDiff.maxJump,
     };
 
-    var banningEnabled = banning && banning.enabled;
+    const banningEnabled = banning && banning.enabled;
     const miner = new Miner({
       id, login, pass: params.pass, ip: this.socket.remoteAddress,
       difficulty, noRetarget, VarDiff: varDiffNew,
       diff1,
-      currentBlockTemplate,
+      // currentBlockTemplate,
       options: this.config.poolServer,
       banningEnabled
     }, trust, this, this.logger);
-    Handler.connectedMiners[id] = miner;
+    MiningServer.connectedMiners[id] = miner;
 
     this.reply(json, null, {
       id,
@@ -229,8 +207,8 @@ export class Handler {
     const rename = promisify(this.redis.rename).bind(this.redis);
     const hgetall = promisify(this.redis.hgetall).bind(this.redis);
 
-    var dateNow = Date.now();
-    var dateNowSeconds = dateNow / 1000 | 0;
+    const dateNow = Date.now();
+    const dateNowSeconds = dateNow / 1000 | 0;
 
     //Weighting older shares lower than newer ones to prevent pool hopping
     if (this.config.poolServer.slushMining.enabled) {
@@ -262,7 +240,7 @@ export class Handler {
         await hset([this.config.coin, 'stats', 'lastBlockFound'].join(':'), Date.now());
         await rename([this.config.coin, 'shares', 'roundCurrent'].join(':'), this.config.coin + ':shares:round' + job.height);
         const workerShares = await hgetall([this.config.coin, 'shares', 'round', job.height].join(':'));
-        var totalShares = Object.keys(workerShares).reduce(function (p, c) {
+        const totalShares = Object.keys(workerShares).reduce(function (p, c) {
           return p + parseInt(workerShares[c])
         }, 0);
         try {
@@ -322,7 +300,7 @@ export class Handler {
           [blockFastHash.substr(0, 6), job.height, miner.login, miner.ip, result]
         );
         this.recordShareData(miner, job, hashDiff.toString(), true, blockFastHash, shareType, blockTemplate);
-        this.jobRefresh();
+        BlockTemplate.jobRefresh(false, this.req, this.logger, this.config);
       } catch (e) {
         this.logger.append('error', 'pool', 'Error submitting block at height %d from %s@%s, share type: "%s" - %j', [job.height, miner.login, miner.ip, shareType, e]);
 
@@ -339,46 +317,14 @@ export class Handler {
     return true;
   }
 
-
-  async getBlockTemplate() {
-
-    return this.req.daemon('/', 'getblocktemplate', { reserve_size: 8, wallet_address: this.config.poolServer.poolAddress });
-  }
-
-
-
-  async jobRefresh(loop: boolean = false) {
-    try {
-      const template = await this.getBlockTemplate();
-      if (!currentBlockTemplate || template.height > currentBlockTemplate.height) {
-        this.logger.append('info', 'pool', 'New block to mine at height %d w/ difficulty of %d', [template.height, template.difficulty]);
-        this.processBlockTemplate(template);
-      }
-    } catch (e) {
-      this.logger.append('error', 'pool', 'Error polling getblocktemplate %j', [e]);
-      return;
-    }
-
-    if (loop)
-      setTimeout(() => {
-        this.jobRefresh(true);
-      }, this.config.poolServer.blockRefreshInterval);
-  }
-
-  processBlockTemplate(template: any) {
-
-    if (currentBlockTemplate)
-      validBlockTemplates.push(currentBlockTemplate);
-
-    if (validBlockTemplates.length > 3)
-      validBlockTemplates.shift();
-
-    currentBlockTemplate = new BlockTemplate(template);
-
-    for (var minerId in Handler.connectedMiners) {
-      var miner = Handler.connectedMiners[minerId];
-      miner.pushMessage('job', miner.getJob());
-    }
+  sendMessage(method: string, params: object) {
+    if (!this.socket.writable) return;
+    var sendData = JSON.stringify({
+      jsonrpc: "2.0",
+      method: method,
+      params: params
+    }) + "\n";
+    this.socket.write(sendData);
   }
 
   handleMinerMethod(json: any) {
@@ -386,12 +332,15 @@ export class Handler {
     const { method, params } = json;
 
 
-    const miner = Handler.connectedMiners[params.id];
+    const miner = MiningServer.connectedMiners[params.id];
 
     // Check for ban here, so preconnected attackers can't continue to screw you
-    if (this.isBanned(String(this.socket.remoteAddress))) {
+    const bannedStatus = MiningServer.isBanned(String(this.socket.remoteAddress), this.config);
+    if (bannedStatus === 0) {
       this.reply(json, 'your IP is banned', null);
       return;
+    } else if (bannedStatus === -1) {
+      this.logger.append('info', 'pool', 'Ban dropped for %s', [String(this.socket.remoteAddress)]);
     }
 
     if (method === 'login') {
@@ -412,6 +361,8 @@ export class Handler {
       case 'submit':
         miner.heartbeat();
 
+        const job = miner.getJob()
+
         if (!miner.isValidJob(params.job_id)) {
           this.reply(json, 'Invalid job id', miner.getJob());
           return;
@@ -421,7 +372,7 @@ export class Handler {
         if (!noncePattern.test(params.nonce)) {
           const minerText = miner ? (' ' + miner.login + '@' + miner.ip) : '';
           this.logger.append('warn', 'pool', 'Malformed nonce: ' + JSON.stringify(params) + ' from ' + minerText, []);
-          Handler.perIPStats[miner.ip] = { validShares: 0, invalidShares: 999999 };
+          MiningServer.perIPStats[miner.ip] = { validShares: 0, invalidShares: 999999 };
           miner.checkBan(false);
           this.reply(json, 'Duplicate share', miner.getJob());
           return;
@@ -430,7 +381,7 @@ export class Handler {
         if (job.submissions.indexOf(params.nonce) !== -1) {
           const minerText = miner ? (' ' + miner.login + '@' + miner.ip) : '';
           this.logger.append('warn', 'pool', 'Duplicate share: ' + JSON.stringify(params) + ' from ' + minerText, []);
-          Handler.perIPStats[miner.ip] = { validShares: 0, invalidShares: 999999 };
+          MiningServer.perIPStats[miner.ip] = { validShares: 0, invalidShares: 999999 };
           miner.checkBan(false);
           this.reply(json, 'Duplicate share', null);
           return;
@@ -438,10 +389,7 @@ export class Handler {
 
         job.submissions.push(params.nonce);
 
-        const blockTemplate = currentBlockTemplate.height === job.height ? currentBlockTemplate :
-          validBlockTemplates.filter(function (t: any) {
-            return t.height === job.height;
-          })[0];
+        const blockTemplate = BlockTemplate.getJobTemplate(job);
 
         if (!blockTemplate) {
           this.reply(json, 'Block expired', null);

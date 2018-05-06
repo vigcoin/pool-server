@@ -17,6 +17,9 @@ export class MiningServer {
 
   req: PoolRequest;
   logName: 'pool';
+  retargetTimer: NodeJS.Timer;
+  checkMinerTimer: NodeJS.Timer;
+  timeoutInterval: number = 30000;
 
   public static perIPStats: any = {};
   public static banned: any = {};
@@ -61,7 +64,7 @@ export class MiningServer {
   }
 
   startRetargetMiners() {
-    setInterval(() => {
+    this.retargetTimer = setInterval(() => {
       this.retargetMiners();
     }, this.config.poolServer.varDiff.retargetTime * 1000);
   }
@@ -77,9 +80,10 @@ export class MiningServer {
   }
 
   startCheckTimeout() {
-    setInterval(() => {
+    const { timeoutInterval } = this.config.poolServer;
+    this.checkMinerTimer = setInterval(() => {
       this.checkTimeOutMiners();
-    }, 30000);
+    }, timeoutInterval || this.timeoutInterval);
 
   }
 
@@ -108,6 +112,7 @@ export class MiningServer {
       }
     }
   }
+
   async listen() {
     for (const port of Object.keys(this.servers)) {
       let server = this.servers[port];
@@ -116,10 +121,15 @@ export class MiningServer {
       try {
         await listen(port);
         this.logger.append('info', 'pool', 'Started server listening on port %d', [port]);
-
       } catch (e) {
         this.logger.append('info', 'pool', 'Could not start server listening on port %d, error: $j', [port, e]);
       }
+    }
+  }
+
+  closeAll() {
+    for (const server of this.servers) {
+      server.close();
     }
   }
 }

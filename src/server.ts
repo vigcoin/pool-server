@@ -53,7 +53,6 @@ export class MiningServer {
 
     const { banning } = this.config.poolServer;
     const { ip, id, address } = worker;
-    console.log(banning);
     if (!banning.enabled) return;
 
     // Init global per-IP shares stats
@@ -64,14 +63,13 @@ export class MiningServer {
     const stats = MiningServer.perIPStats[ip];
     validShare ? stats.validShares++ : stats.invalidShares++;
     if (stats.validShares + stats.invalidShares >= banning.checkThreshold) {
-      console.log(stats.invalidShares / stats.validShares , banning.invalidPercent / 100);
       if (stats.invalidShares / stats.validShares >= banning.invalidPercent / 100) {
         // this.logger.append('warn', 'pool', 'Banned %s@%s', [address, ip]);
         MiningServer.banned[ip] = Date.now();
         delete MiningServer.connectedMiners[id];
-        // if (process.send) {
-        //   process.send({ type: 'banIP', ip });
-        // }
+        if (process.send) {
+          process.send({ type: 'banIP', ip });
+        }
       }
       else {
         stats.invalidShares = 0;
@@ -111,7 +109,6 @@ export class MiningServer {
 
   startCheckTimeout() {
     const { timeoutInterval } = this.config.poolServer;
-    console.log(timeoutInterval);
     this.checkMinerTimer = setInterval(() => {
       this.checkTimeOutMiners();
     }, timeoutInterval || this.timeoutInterval);
@@ -123,11 +120,6 @@ export class MiningServer {
     if (banningEnabled) {
       for (const ip of Object.keys(MiningServer.banned)) {
         const banTime = MiningServer.banned[ip];
-
-        console.log(banTime);
-        console.log(now - banTime > banning.time * 1000);
-
-
         if (now - banTime > banning.time * 1000) {
           delete MiningServer.banned[ip];
           delete MiningServer.perIPStats[ip];
@@ -141,7 +133,6 @@ export class MiningServer {
     for (const minerId of Object.keys(MiningServer.connectedMiners)) {
       const miner = MiningServer.connectedMiners[minerId];
       if (now - miner.lastBeat > timeout) {
-        console.log(miner);
         miner.timeout();
         delete MiningServer.connectedMiners[minerId];
       }

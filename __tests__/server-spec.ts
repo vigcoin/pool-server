@@ -85,6 +85,15 @@ test('Should  check timedout miners', (done) => {
   }, 1000);
 });
 
+test('Should  check timedout miners', () => {
+  MiningServer.connectedMiners['aaa'] = {
+    lastBeat: Date.now(),
+    timeout: () => {
+    }
+  };
+  server.removeTimeout(Date.now(), banning, minerTimeout);
+});
+
 
 test('Should  retarget miners', (done) => {
   MiningServer.connectedMiners['aaa'] = {
@@ -112,6 +121,15 @@ test('Should  check timedout miners', (done) => {
   }, 1000);
 });
 
+test('Should  check timedout miners', () => {
+  MiningServer.banned['aaa'] = Date.now();
+  server.removeBanned(Date.now(), banning);
+});
+
+test('Should  check timedout miners', () => {
+  server.removeBanned(Date.now(), null);
+});
+
 test('Should  check is banned', (done) => {
   console.log("banned");
   MiningServer.banned['aaa'] = Date.now();
@@ -126,9 +144,25 @@ test('Should  check is banned', (done) => {
 });
 
 test('Should  check banned', () => {
+  process.send = function () { };
   server.checkBan(true, { ip: 'ip', id: 'id', address: 'address' })
   server.checkBan(true, { ip: 'ip', id: 'id', address: 'address' })
   server.checkBan(true, { ip: 'ip', id: 'id', address: 'address' })
+  server.checkBan(false, { ip: 'ip', id: 'id', address: 'address' });
+  config.poolServer.banning.enabled = false;
+  server.checkBan(false, { ip: 'ip', id: 'id', address: 'address' });
+  config.poolServer.banning.enabled = true;
+
+});
+
+test('Should  check banned', () => {
+  process.send = null;
+  MiningServer.perIPStats = {};
+  server.checkBan(true, { ip: 'ip', id: 'id', address: 'address' })
+  server.checkBan(true, { ip: 'ip', id: 'id', address: 'address' })
+  server.checkBan(true, { ip: 'ip', id: 'id', address: 'address' })
+  server.checkBan(false, { ip: 'ip', id: 'id', address: 'address' });
+  config.poolServer.banning.enabled = false;
   server.checkBan(false, { ip: 'ip', id: 'id', address: 'address' });
 });
 

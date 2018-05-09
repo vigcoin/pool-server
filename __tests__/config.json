@@ -22,7 +22,7 @@
         "clusterForks": "auto",
         "poolAddress": "aaa",
         "blockRefreshInterval": 1000,
-        "minerTimeout": 900,
+        "minerTimeout": 0.1,
         "ports": [
             {
                 "port": 4444,
@@ -49,8 +49,8 @@
         "varDiff": {
             "minDiff": 100,
             "maxDiff": 200000,
-            "targetTime": 100,
-            "retargetTime": 30,
+            "targetTime": 0.1,
+            "retargetTime": 0.1,
             "variancePercent": 30,
             "maxJump": 100
         },
@@ -67,9 +67,9 @@
         },
         "banning": {
             "enabled": true,
-            "time": 600,
+            "time": 0.1,
             "invalidPercent": 25,
-            "checkThreshold": 30
+            "checkThreshold": 2
         },
         "slushMining": {
             "enabled": false,

@@ -59,6 +59,7 @@ export class Handler {
     this.difficulty = difficulty;
     this.socket = socket;
     this.logger = logger;
+    this.buffer = new Buffer(0);
     this.addressBase58Prefix = cnUtil.address_decode(new Buffer(this.config.poolServer.poolAddress));
 
     socket.on('data', async (data: Buffer) => {
@@ -186,8 +187,9 @@ export class Handler {
       diff1,
       // currentBlockTemplate,
       options: this.config.poolServer,
-      banningEnabled
-    }, trust, this, this.logger);
+      banningEnabled,
+      trust
+    }, this, this.logger);
     MiningServer.connectedMiners[id] = miner;
 
     this.reply(json, null, {

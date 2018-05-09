@@ -9,24 +9,27 @@ import { BlockTemplate } from "./block-template";
 import { v1 } from "uuid";
 
 export class Miner {
-  attributes: any = {};
+  public attributes: any = {};
   handler: Handler
   validJobs: any = [];
   shareTimeRing: RingBuffer;
   lastShareTime = Date.now() / 1000;
-  trust: any;
-  lastBeat = Date.now();
+  public lastBeat = Date.now();
   logger: Logger;
 
-  constructor(attributes: any, trust: any, handler: Handler, logger: Logger) {
+  constructor(attributes: any, handler: Handler, logger: Logger) {
     // ['id', 'login', 'pass', 'ip', 'noRetarget', 'difficuty']
     this.attributes = attributes;
 
     // Vardiff related variables
     this.shareTimeRing = new RingBuffer(16);
-    this.trust = trust;
     this.handler = handler;
     this.logger = logger;
+  }
+
+  timedout() {
+    const { login, ip } = this.attributes;
+    this.logger.append('warn', 'pool', 'Miner timed out and disconnected %s@%s', [login, ip]);
   }
   heartbeat() {
     this.lastBeat = Date.now();
@@ -155,29 +158,29 @@ export class Miner {
     return jobs.length;
   }
 
-  checkBan(validShare: boolean) {
+  // checkBan(validShare: boolean) {
 
-    const { id, ip, banningEnabled, config, login } = this.attributes;
-    if (!banningEnabled) return;
+  //   const { id, ip, banningEnabled, config, login } = this.attributes;
+  //   if (!banningEnabled) return;
 
-    // Init global per-IP shares stats
-    if (!Handler.perIPStats[ip]) {
-      Handler.perIPStats[ip] = { validShares: 0, invalidShares: 0 };
-    }
+  //   // Init global per-IP shares stats
+  //   if (!Handler.perIPStats[ip]) {
+  //     Handler.perIPStats[ip] = { validShares: 0, invalidShares: 0 };
+  //   }
 
-    const stats = Handler.perIPStats[ip];
-    validShare ? stats.validShares++ : stats.invalidShares++;
-    if (stats.validShares + stats.invalidShares >= config.banning.checkThreshold) {
-      if (stats.invalidShares / stats.validShares >= config.banning.invalidPercent / 100) {
-        this.logger.append('warn', 'pool', 'Banned %s@%s', [login, ip]);
-        Handler.banned[ip] = Date.now();
-        delete Handler.connectedMiners[id];
-        process.send({ type: 'banIP', ip });
-      }
-      else {
-        stats.invalidShares = 0;
-        stats.validShares = 0;
-      }
-    }
-  }
+  //   const stats = Handler.perIPStats[ip];
+  //   validShare ? stats.validShares++ : stats.invalidShares++;
+  //   if (stats.validShares + stats.invalidShares >= config.banning.checkThreshold) {
+  //     if (stats.invalidShares / stats.validShares >= config.banning.invalidPercent / 100) {
+  //       this.logger.append('warn', 'pool', 'Banned %s@%s', [login, ip]);
+  //       Handler.banned[ip] = Date.now();
+  //       delete Handler.connectedMiners[id];
+  //       process.send({ type: 'banIP', ip });
+  //     }
+  //     else {
+  //       stats.invalidShares = 0;
+  //       stats.validShares = 0;
+  //     }
+  //   }
+  // }
 }

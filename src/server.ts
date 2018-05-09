@@ -1,6 +1,7 @@
 import { Logger } from '@vigcoin/logger';
 import { PoolRequest } from '@vigcoin/pool-request';
 import { Handler } from './socket-handler';
+import { Miner } from './miner';
 import { RedisClient } from 'redis';
 
 import { BlockTemplate } from "./block-template";
@@ -19,7 +20,7 @@ export class MiningServer {
   logName: 'pool';
   retargetTimer: NodeJS.Timer;
   checkMinerTimer: NodeJS.Timer;
-  timeoutInterval: number = 30000;
+  timeoutInterval: number = 30000;   // in case configuration file is not configurated.
 
   public static perIPStats: any = {};
   public static banned: any = {};
@@ -43,9 +44,43 @@ export class MiningServer {
     this.startCheckTimeout();
   }
 
+  stop() {
+    clearInterval(this.retargetTimer);
+    clearInterval(this.checkMinerTimer);
+  }
+
+  checkBan(validShare: boolean, worker: any) {
+
+    const { banning } = this.config.poolServer;
+    const { ip, id, address } = worker;
+    console.log(banning);
+    if (!banning.enabled) return;
+
+    // Init global per-IP shares stats
+    if (!MiningServer.perIPStats[ip]) {
+      MiningServer.perIPStats[ip] = { validShares: 0, invalidShares: 0 };
+    }
+
+    const stats = MiningServer.perIPStats[ip];
+    validShare ? stats.validShares++ : stats.invalidShares++;
+    if (stats.validShares + stats.invalidShares >= banning.checkThreshold) {
+      console.log(stats.invalidShares / stats.validShares , banning.invalidPercent / 100);
+      if (stats.invalidShares / stats.validShares >= banning.invalidPercent / 100) {
+        // this.logger.append('warn', 'pool', 'Banned %s@%s', [address, ip]);
+        MiningServer.banned[ip] = Date.now();
+        delete MiningServer.connectedMiners[id];
+        // if (process.send) {
+        //   process.send({ type: 'banIP', ip });
+        // }
+      }
+      else {
+        stats.invalidShares = 0;
+        stats.validShares = 0;
+      }
+    }
+  }
   static isBanned(ip: string, config: any) {
     if (!MiningServer.banned[ip]) return 1;
-
     const bannedTime = MiningServer.banned[ip];
     const bannedTimeAgo = Date.now() - bannedTime;
     const timeLeft = config.poolServer.banning.time * 1000 - bannedTimeAgo;
@@ -54,13 +89,8 @@ export class MiningServer {
     }
     else {
       delete MiningServer.banned[ip];
-      // logger.append('info', 'pool', 'Ban dropped for %s', [ip]);
       return -1;
     }
-  }
-
-  async getBlockTemplate() {
-    return this.req.daemon('/', 'getblocktemplate', { reserve_size: 8, wallet_address: this.config.poolServer.poolAddress });
   }
 
   startRetargetMiners() {
@@ -81,30 +111,24 @@ export class MiningServer {
 
   startCheckTimeout() {
     const { timeoutInterval } = this.config.poolServer;
+    console.log(timeoutInterval);
     this.checkMinerTimer = setInterval(() => {
       this.checkTimeOutMiners();
     }, timeoutInterval || this.timeoutInterval);
 
   }
 
-  checkTimeOutMiners() {
-    /* Every 30 seconds clear out timed-out miners and old bans */
-    const now = Date.now();
-    let { banning } = this.config.poolServer;
-
+  removeBanned(now: any, banning: any) {
     const banningEnabled = banning && banning.enabled;
-    const timeout = this.config.poolServer.minerTimeout * 1000;
-    for (const minerId of Object.keys(MiningServer.connectedMiners)) {
-      const miner = MiningServer.connectedMiners[minerId];
-      if (now - miner.lastBeat > timeout) {
-        this.logger.append('warn', 'pool', 'Miner timed out and disconnected %s@%s', [miner.login, miner.ip]);
-        delete MiningServer.connectedMiners[minerId];
-      }
-    }
     if (banningEnabled) {
-      for (const ip in MiningServer.banned) {
+      for (const ip of Object.keys(MiningServer.banned)) {
         const banTime = MiningServer.banned[ip];
-        if (now - banTime > this.config.poolServer.banning.time * 1000) {
+
+        console.log(banTime);
+        console.log(now - banTime > banning.time * 1000);
+
+
+        if (now - banTime > banning.time * 1000) {
           delete MiningServer.banned[ip];
           delete MiningServer.perIPStats[ip];
           this.logger.append('info', 'pool', 'Ban dropped for %s', [ip]);
@@ -112,23 +136,42 @@ export class MiningServer {
       }
     }
   }
-
-  async listen() {
-    for (const port of Object.keys(this.servers)) {
-      let server = this.servers[port];
-
-      const listen = promisify(server.listen).bind(server);
-      try {
-        await listen(port);
-        this.logger.append('info', 'pool', 'Started server listening on port %d', [port]);
-      } catch (e) {
-        this.logger.append('info', 'pool', 'Could not start server listening on port %d, error: $j', [port, e]);
+  public removeTimeout(now: any, banning: any, minerTimeout: any) {
+    const timeout = minerTimeout * 1000;
+    for (const minerId of Object.keys(MiningServer.connectedMiners)) {
+      const miner = MiningServer.connectedMiners[minerId];
+      if (now - miner.lastBeat > timeout) {
+        console.log(miner);
+        miner.timeout();
+        delete MiningServer.connectedMiners[minerId];
       }
     }
   }
 
+  checkTimeOutMiners() {
+    /* Every 30 seconds clear out timed-out miners and old bans */
+    const now = Date.now();
+    let { banning, minerTimeout } = this.config.poolServer;
+    this.removeTimeout(now, banning, minerTimeout);
+    this.removeBanned(now, banning);
+  }
+
+  async listen() {
+    for (const port of Object.keys(this.servers)) {
+      let server = this.servers[port];
+      const listen = promisify(server.listen).bind(server);
+      // try {
+      await listen(port);
+      this.logger.append('info', 'pool', 'Started server listening on port %d', [port]);
+      // } catch (e) {
+      //   this.logger.append('info', 'pool', 'Could not start server listening on port %d, error: $j', [port, e]);
+      // }
+    }
+  }
+
   closeAll() {
-    for (const server of this.servers) {
+    for (const port of Object.keys(this.servers)) {
+      const server = this.servers[port];
       server.close();
     }
   }

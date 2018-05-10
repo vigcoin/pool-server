@@ -181,7 +181,6 @@ test('Should  response to request', (done) => {
     const client = net.connect(port, function () {
       client.write("hello");
       setTimeout(() => {
-        server.closeAll();
         done();
       }, 500)
     });
@@ -189,7 +188,226 @@ test('Should  response to request', (done) => {
   }
 });
 
+test('Should  close socket flooding', (done) => {
+  for (const { port, difficulty } of config.poolServer.ports) {
+    const client = net.connect(port, function () {
+      const buffer = new Buffer(1024 * 11);
+      client.write(buffer);
+      setTimeout(() => {
+        done();
+      }, 500)
+    });
+    break;
+  }
+});
+
+// Socket Handling
+test('Should sending', (done) => {
+  for (const { port, difficulty } of config.poolServer.ports) {
+    const client = net.connect(port, function () {
+      const buffer = Buffer.from('hsos\nsososss');
+      client.write(buffer);
+      setTimeout(() => {
+        done();
+      }, 500)
+    });
+    break;
+  }
+});
+
+test('Should sending', (done) => {
+  for (const { port, difficulty } of config.poolServer.ports) {
+    const client = net.connect(port, function () {
+      const buffer = Buffer.from('{"aa": 111}\nsososss');
+      client.write(buffer);
+      setTimeout(() => {
+        done();
+      }, 500)
+    });
+    break;
+  }
+});
+
+test('Should sending', (done) => {
+  for (const { port, difficulty } of config.poolServer.ports) {
+    const client = net.connect(port, function () {
+      const buffer = Buffer.from('{"method": "send"}\nsososss');
+      client.write(buffer);
+      setTimeout(() => {
+        done();
+      }, 500)
+    });
+    break;
+  }
+});
+
+test('Should sending HTTP/1.1', (done) => {
+  for (const { port, difficulty } of config.poolServer.ports) {
+    const client = net.connect(port, function () {
+      const buffer = Buffer.from('GET / HTTP/1.1 GET /\nsososss');
+      client.write(buffer);
+      setTimeout(() => {
+        done();
+      }, 500)
+    });
+    break;
+  }
+});
+
+test('Should sending HTTP/1.0', (done) => {
+  for (const { port, difficulty } of config.poolServer.ports) {
+    const client = net.connect(port, function () {
+      const buffer = Buffer.from('GET / HTTP/1.0 GET /\nsososss');
+      client.write(buffer);
+      client.on("data", (data) => {
+        console.log(String(data));
+        const headers = String(data).split("\n");
+        expect(headers[0]).toBe('HTTP/1.0 200 OK');
+        expect(headers[1]).toBe('Content-Type: text/plain');
+        expect(headers[2]).toBe('Content-Length: 20');
+        expect(headers[4]).toBe('mining server online');
+        done();
+      });
+    });
+    break;
+  }
+});
+
+test('Should sending HTTP/1.0 1', (done) => {
+  for (const { port, difficulty } of config.poolServer.ports) {
+    const client = net.connect(port, function () {
+      const buffer = Buffer.from('{"ss": "ge"}\n');
+      client.write(buffer);
+    });
+    client.on("data", (data) => {
+      console.log(String(data));
+      done();
+    });
+    setTimeout(() => {
+      done();
+    }, 500);
+    break;
+  }
+});
+
+test('Should sending HTTP/1.0 1', (done) => {
+  for (const { port, difficulty } of config.poolServer.ports) {
+    const client = net.connect(port, function () {
+      const buffer = Buffer.from('{"method": "ge"}\n');
+      try {
+        client.write(buffer);
+      } catch (e) {
+        console.log(e);
+      }
+    });
+    setTimeout(() => {
+      done();
+    }, 500);
+    break;
+  }
+});
+
+test('Should sending HTTP/1.0 1', (done) => {
+  for (const { port, difficulty } of config.poolServer.ports) {
+    const client = net.connect(port, function () {
+      const buffer = Buffer.from('{"method": "login", "id": "aaa", "params": {"id": "10"}}\n');
+      client.write(buffer);
+    });
+    client.on("data", (data) => {
+      console.log(String(data));
+      const list = String(data).split("\n");
+
+      expect(list[0]).toBe('{"id":"aaa","jsonrpc":"2.0","error":{"code":-1,"message":"missing login"},"result":null}');
+      done();
+    });
+    break;
+  }
+});
+
+test('Should sending HTTP/1.0 1', (done) => {
+  for (const { port, difficulty } of config.poolServer.ports) {
+    const client = net.connect(port, function () {
+      const buffer = Buffer.from('{"method": "login", "id": "aaa", "params": {"id": "10", "login": "aaa"}}\n');
+      client.write(buffer);
+    });
+    client.on("data", (data) => {
+      console.log(String(data));
+
+      const list = String(data).split("\n");
+      console.log(list);
+      const json = JSON.parse(list[0]);
+      expect(json.id).toBe("aaa");
+      expect(json.jsonrpc).toBe("2.0");
+      expect(json.error).toBe(null);
+      expect(json.result.id).toBeTruthy();
+      expect(json.result.job).toBeTruthy();
+      expect(json.result.status).toBe("OK");
+      done();
+    });
+    break;
+  }
+});
+
+// test('Should sending HTTP/1.0 1', (done) => {
+//   for (const { port, difficulty } of config.poolServer.ports) {
+//     const client = net.connect(port, function () {
+//       const buffer = Buffer.from('\n\nsososss');
+//       client.write(buffer);
+//     });
+//     setTimeout(() => {
+//       done();
+//     }, 500);
+//     break;
+//   }
+// });
+
+test('Should sending HTTP/1.0 2', (done) => {
+  for (const { port, difficulty } of config.poolServer.ports) {
+    const client = net.connect(port, function () {
+      const buffer = Buffer.from('{"method": "ge"}\n{"method": "ge", "id": "aaa", "params": {"id": "10"}}\n\n\nsososss');
+      client.write(buffer);
+    });
+    client.on("data", (data) => {
+      console.log(String(data));
+      done();
+    });
+    break;
+  }
+});
+
+// test('Should sending HTTP/1.0 3', (done) => {
+//   for (const { port, difficulty } of config.poolServer.ports) {
+//     const client = net.connect(port, function () {
+//       const buffer = Buffer.from('{"method": "ge", "id": "aaa", "params": {"id": "10"}}\n\n\nsososss');
+//       client.write(buffer);
+//     });
+//     client.on("data", (data) => {
+//       console.log(String(data));
+//       done();
+//     });
+//     break;
+//   }
+// });
+
+// test('Should sending HTTP/1.0 4', (done) => {
+//   for (const { port, difficulty } of config.poolServer.ports) {
+//     const client = net.connect(port, function () {
+//       const buffer = Buffer.from('aaaa\n\nsososss');
+//       client.write(buffer);
+//     });
+//     client.on("data", (data) => {
+//       console.log(String(data));
+//       done();
+//     });
+//     setTimeout(() => {
+//       done();
+//     }, 100)
+//     break;
+//   }
+// });
+
 test('Should close all', () => {
+  server.closeAll();
   redis.quit();
 });
 

@@ -52,60 +52,18 @@ export class Handler {
     this.shareTrustStepFloat = this.shareTrustEnabled ? config.poolServer.shareTrust.stepDown / 100 : 0;
     this.shareTrustMinFloat = this.shareTrustEnabled ? config.poolServer.shareTrust.min / 100 : 0;
 
-
     this.req = req;
     this.config = config;
     this.port = port;
     this.difficulty = difficulty;
     this.socket = socket;
     this.logger = logger;
-    this.buffer = new Buffer(0);
+    this.buffer = new Buffer('');
     this.addressBase58Prefix = cnUtil.address_decode(new Buffer(this.config.poolServer.poolAddress));
 
     socket.on('data', async (data: Buffer) => {
-      await this.onData(data);
+      this.onData(data);
     });
-  }
-
-  async onData(data: Buffer) {
-    this.buffer = Buffer.concat([this.buffer, data], this.buffer.length + data.length);
-    if (Buffer.byteLength(this.buffer, 'utf8') > 10240) {
-      //10KB
-      this.buffer = new Buffer('');
-      this.logger.append('warn', this.logName, 'Socket flooding detected and prevented from %s', [String(this.socket.remoteAddress)]);
-      this.socket.destroy();
-      return;
-    }
-    if (this.buffer.indexOf('\n') !== -1) {
-      const messages = String(this.buffer).split('\n');
-      const incomplete = String(this.buffer).slice(-1) === '\n' ? '' : messages.pop();
-      for (let i = 0; i < messages.length; i++) {
-        const message = messages[i];
-        if (message.trim() === '') continue;
-        let jsonData;
-        try {
-          jsonData = JSON.parse(message);
-        }
-        catch (e) {
-          if (message.indexOf('GET /') === 0) {
-            if (message.indexOf('HTTP/1.1') !== -1) {
-              this.socket.end('HTTP/1.1' + Handler.httpResponse);
-              break;
-            }
-            else if (message.indexOf('HTTP/1.0') !== -1) {
-              this.socket.end('HTTP/1.0' + Handler.httpResponse);
-              break;
-            }
-          }
-
-          this.logger.append('warn', this.logName, 'Malformed message from %s: %s', [String(this.socket.remoteAddress), message]);
-          this.socket.destroy();
-          break;
-        }
-        this.handleMesage(jsonData)
-      }
-      this.buffer = Buffer.from(String(incomplete));
-    }
   }
 
   async handleMesage(json: any) {
@@ -333,6 +291,9 @@ export class Handler {
 
     const { method, params } = json;
 
+    console.log('inside method' + method);
+    console.log(params);
+
 
     const miner = MiningServer.connectedMiners[params.id];
 
@@ -346,10 +307,13 @@ export class Handler {
     }
 
     if (method === 'login') {
+      console.log("inside login");
       this.onLogin(json, params);
+      return;
     }
 
     if (!miner) {
+      console.log("inside unauthen");
       this.reply(json, 'Unauthenticated', null);
       return;
 
@@ -435,9 +399,51 @@ export class Handler {
         break;
       default:
         this.reply(json, "invalid method", null);
-        const minerText = miner ? (' ' + miner.login + '@' + miner.ip) : '';
+        const minerText = miner ? miner.getUserAddress() : '';
         this.logger.append('warn', 'pool', 'Invalid method: %s (%j) from %s', [method, params, minerText]);
         break;
+    }
+  }
+
+  onData(data: Buffer) {
+    this.buffer = Buffer.concat([this.buffer, data], this.buffer.length + data.length);
+    console.log("data = " + String(this.buffer));
+    if (Buffer.byteLength(this.buffer, 'utf8') > 10240) {
+      // 10KB
+      this.buffer = new Buffer('');
+      this.logger.append('warn', this.logName, 'Socket flooding detected and prevented from %s', [String(this.socket.remoteAddress)]);
+      this.socket.destroy();
+      return;
+    }
+    if (this.buffer.indexOf('\n') !== -1) {
+      const messages = String(this.buffer).split('\n');
+      const incomplete = String(this.buffer).slice(-1) === '\n' ? '' : messages.pop();
+      this.buffer = Buffer.from(String(incomplete));
+      for (let i = 0; i < messages.length; i++) {
+        const message = messages[i];
+        if (message.trim() === '') continue;
+        let jsonData;
+        try {
+          jsonData = JSON.parse(message);
+        }
+        catch (e) {
+          if (message.indexOf('GET /') === 0) {
+            if (message.indexOf('HTTP/1.1') !== -1) {
+              this.socket.end('HTTP/1.1' + Handler.httpResponse);
+              break;
+            }
+            else if (message.indexOf('HTTP/1.0') !== -1) {
+              this.socket.end('HTTP/1.0' + Handler.httpResponse);
+              break;
+            }
+          }
+
+          this.logger.append('warn', this.logName, 'Malformed message from %s: %s', [String(this.socket.remoteAddress), message]);
+          this.socket.destroy();
+          break;
+        }
+        this.handleMesage(jsonData)
+      }
     }
   }
 }

@@ -25,6 +25,7 @@ export class MiningServer {
   public static perIPStats: any = {};
   public static banned: any = {};
   public static connectedMiners: any = {};
+  public static handlers: any = [];
 
   constructor(config: any, logger: Logger, poolRequest: PoolRequest, redis: RedisClient) {
     this.config = config;
@@ -33,7 +34,9 @@ export class MiningServer {
     for (const { port, difficulty } of this.config.poolServer.ports) {
 
       const server = net.createServer(async (socket) => {
-        new Handler(this.config, port, difficulty, socket, logger, poolRequest, redis);
+        MiningServer.handlers.push(
+          new Handler(this.config, port, difficulty, socket, logger, poolRequest, redis)
+        );
       });
       this.servers[port] = server;
     }

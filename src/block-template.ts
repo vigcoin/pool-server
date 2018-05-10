@@ -3,7 +3,7 @@ import * as util from '@vigcoin/cryptonote-util';
 import { PoolRequest } from '@vigcoin/pool-request';
 import { Logger } from '@vigcoin/logger';
 
-import { Handler } from "./socket-handler";
+import { MiningServer } from "./server";
 
 var instanceId = crypto.randomBytes(4);
 
@@ -68,8 +68,8 @@ export class BlockTemplate {
   }
 
   static notifyMiners() {
-    for (const minerId of Object.keys(Handler.connectedMiners)) {
-      const miner = Handler.connectedMiners[minerId];
+    for (const minerId of Object.keys(MiningServer.connectedMiners)) {
+      const miner = MiningServer.connectedMiners[minerId];
       miner.pushMessage('job', miner.getJob());
     }
   }

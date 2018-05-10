@@ -116,7 +116,15 @@ export class Miner {
     const { score, diffHex, difficulty, lastBlockHeight, pendingDifficulty } = this.attributes;
     const currentBlockTemplate = BlockTemplate.currentBlockTemplate;
 
-    if (lastBlockHeight === currentBlockTemplate.height && !pendingDifficulty) {
+    if (!currentBlockTemplate) {
+      return {
+        blob: '',
+        job_id: '',
+        target: ''
+      };
+    }
+
+    if ((lastBlockHeight === currentBlockTemplate.height) && !pendingDifficulty) {
       return {
         blob: '',
         job_id: '',
@@ -183,4 +191,10 @@ export class Miner {
   //     }
   //   }
   // }
+
+  getUserAddress() {
+    const { ip, login } = this.attributes;
+    return ' ' + login + '@' + ip;
+
+  }
 }

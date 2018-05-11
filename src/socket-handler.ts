@@ -368,6 +368,7 @@ export class Handler {
     console.log(miner);
 
     // Check for ban here, so preconnected attackers can't continue to screw you
+    console.log(String(this.socket.remoteAddress));
     const bannedStatus = MiningServer.isBanned(String(this.socket.remoteAddress), this.config);
     if (bannedStatus === 0) {
       this.reply(json, 'your IP is banned', null);

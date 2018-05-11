@@ -35,7 +35,7 @@ export class MiningServer {
 
       const server = net.createServer(async (socket) => {
         MiningServer.handlers.push(
-          new Handler(this.config, port, difficulty, socket, logger, poolRequest, redis)
+          new Handler(this, this.config, port, difficulty, socket, logger, poolRequest, redis)
         );
       });
       this.servers[port] = server;
@@ -52,7 +52,7 @@ export class MiningServer {
     clearInterval(this.checkMinerTimer);
   }
 
-  checkBan(validShare: boolean, worker: any) {
+  public checkBan(validShare: boolean, worker: any) {
 
     const { banning } = this.config.poolServer;
     const { ip, id, address } = worker;

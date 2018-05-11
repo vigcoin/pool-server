@@ -7,9 +7,20 @@ import { Handler } from './socket-handler';
 import { RingBuffer } from "./ring-buffer";
 import { BlockTemplate } from "./block-template";
 import { v1 } from "uuid";
+import { MiningServer } from "./server";
+
+import * as cnUtil from '@vigcoin/cryptonote-util';
+
+import { cryptonight as cryptoNight } from '@vigcoin/multi-hashing';
+
+import * as bignum from "bignum";
+
+const diff1 = bignum('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16);
+
 
 export class Miner {
   public attributes: any = {};
+  public trust: any = {};
   handler: Handler
   validJobs: any = [];
   shareTimeRing: RingBuffer;
@@ -25,6 +36,7 @@ export class Miner {
     this.shareTimeRing = new RingBuffer(16);
     this.handler = handler;
     this.logger = logger;
+    this.trust = {};
   }
 
   timedout() {
@@ -44,6 +56,7 @@ export class Miner {
     this.attributes.pendingDifficulty = newDiff;
     // this.pushMessage('job', this.getJob());
   }
+
   retarget(now: any) {
 
     const { difficulty, options: config, VarDiff } = this.attributes;
@@ -166,31 +179,39 @@ export class Miner {
     return jobs.length;
   }
 
-  // checkBan(validShare: boolean) {
+  invalidSubmit(params: any, server: MiningServer, heading: string) {
+    const { ip } = this.attributes;
+    MiningServer.perIPStats[ip] = { validShares: 0, invalidShares: 999999 };
+    server.checkBan(false, {});
+    this.logger.append('warn', 'pool', heading + ': ' + JSON.stringify(params) +
+      ' from ' + this.getUserAddress(), []);
+  }
 
-  //   const { id, ip, banningEnabled, config, login } = this.attributes;
-  //   if (!banningEnabled) return;
+  getWoker() {
+    const { ip, id, login: address } = this.attributes;
+    return {
+      id, ip, address
+    };
+  }
 
-  //   // Init global per-IP shares stats
-  //   if (!Handler.perIPStats[ip]) {
-  //     Handler.perIPStats[ip] = { validShares: 0, invalidShares: 0 };
-  //   }
-
-  //   const stats = Handler.perIPStats[ip];
-  //   validShare ? stats.validShares++ : stats.invalidShares++;
-  //   if (stats.validShares + stats.invalidShares >= config.banning.checkThreshold) {
-  //     if (stats.invalidShares / stats.validShares >= config.banning.invalidPercent / 100) {
-  //       this.logger.append('warn', 'pool', 'Banned %s@%s', [login, ip]);
-  //       Handler.banned[ip] = Date.now();
-  //       delete Handler.connectedMiners[id];
-  //       process.send({ type: 'banIP', ip });
-  //     }
-  //     else {
-  //       stats.invalidShares = 0;
-  //       stats.validShares = 0;
-  //     }
-  //   }
-  // }
+  trustCheck(config: any) {
+    const { shareTrustEnabled, shareAccepted, shareTrustStepFloat, shareTrustMinFloat, penalty } = config;
+    const { login: address, ip } = this.attributes;
+    if (shareTrustEnabled) {
+      if (shareAccepted) {
+        this.trust.probability -= shareTrustStepFloat;
+        if (this.trust.probability < shareTrustMinFloat)
+          this.trust.probability = shareTrustMinFloat;
+        this.trust.penalty--;
+        this.trust.threshold--;
+      }
+      else {
+        this.trust.probability = 1;
+        this.trust.penalty = penalty;
+        this.logger.append('warn', 'pool', 'Share trust broken by %s@%s', [address, ip]);
+      }
+    }
+  }
 
   getUserAddress() {
     const { ip, login } = this.attributes;

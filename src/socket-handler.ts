@@ -7,12 +7,13 @@ import { Miner } from "./miner";
 import * as cnUtil from '@vigcoin/cryptonote-util';
 
 import { cryptonight as cryptoNight } from '@vigcoin/multi-hashing';
+import * as bignum from "bignum";
+
 import { RedisClient } from 'redis';
 import { promisify } from 'util';
 
 import { v1 } from "uuid";
 
-import * as bignum from "bignum";
 
 import { BlockTemplate } from './block-template';
 import { MiningServer } from './server';
@@ -44,10 +45,13 @@ export class Handler {
   shareTrustStepFloat: any;
   shareTrustMinFloat: any;
 
+  server: MiningServer;
+
 
   public static httpResponse = ' 200 OK\nContent-Type: text/plain\nContent-Length: 20\n\nmining server online';
 
-  constructor(config: any, port: number, difficulty: number, socket: Socket, logger: Logger, req: PoolRequest, redis: RedisClient) {
+  constructor(server: MiningServer, config: any, port: number, difficulty: number, socket: Socket, logger: Logger, req: PoolRequest, redis: RedisClient) {
+    this.server = server;
     this.shareTrustEnabled = config.poolServer.shareTrust && config.poolServer.shareTrust.enabled;
     this.shareTrustStepFloat = this.shareTrustEnabled ? config.poolServer.shareTrust.stepDown / 100 : 0;
     this.shareTrustMinFloat = this.shareTrustEnabled ? config.poolServer.shareTrust.min / 100 : 0;
@@ -62,7 +66,7 @@ export class Handler {
     this.addressBase58Prefix = cnUtil.address_decode(new Buffer(this.config.poolServer.poolAddress));
 
     socket.on('data', async (data: Buffer) => {
-      this.onData(data);
+      await this.onData(data);
     });
   }
 
@@ -75,7 +79,7 @@ export class Handler {
       this.logger.append('warn', this.logName, 'Miner RPC request missing RPC method', []);
       return;
     }
-    this.handleMinerMethod(json);
+    await this.handleMinerMethod(json);
   }
 
   reply(json: any, error: any, result: any) {
@@ -159,7 +163,69 @@ export class Handler {
     return miner;
   }
 
-  async recordShareData(miner: Miner, job: any, shareDiff: String, blockCandidate: any, hashHex: string, shareType: string, blockTemplate: BlockTemplate) {
+  async processShare(miner: Miner, job: any, blockTemplate: BlockTemplate, params: any) {
+
+    const { nonce, result: resultHash } = params;
+    const { login, ip } = miner.attributes;
+
+    // nonce: string, resultHash: string
+    const template = new Buffer(blockTemplate.buffer.length);
+    blockTemplate.buffer.copy(template);
+    template.writeUInt32BE(job.extraNonce, blockTemplate.reserveOffset);
+    const shareBuffer = cnUtil.construct_block_blob(template, new Buffer(nonce, 'hex'));
+
+    let convertedBlob;
+    let hash;
+    let shareType: any;
+
+    if (this.shareTrustEnabled && miner.trust.threshold <= 0 && miner.trust.penalty <= 0 && Math.random() > miner.trust.probability) {
+      hash = new Buffer(resultHash, 'hex');
+      shareType = 'trusted';
+    }
+    else {
+      convertedBlob = cnUtil.convert_blob(shareBuffer);
+      hash = cryptoNight(convertedBlob);
+      shareType = 'valid';
+    }
+
+
+    if (hash.toString('hex') !== resultHash) {
+      this.logger.append('warn', 'pool', 'Bad hash from miner %s@%s', [login, ip]);
+      return false;
+    }
+
+    const hashArray = hash.toJSON();
+    hashArray.reverse();
+    const hashNum = bignum.fromBuffer(new Buffer(hashArray));
+    const hashDiff = diff1.div(hashNum);
+
+    if (hashDiff.ge(blockTemplate.difficulty)) {
+      try {
+        const result = await this.req.daemon('/', 'submitblock', [shareBuffer.toString('hex')]);
+        const blockFastHash = cnUtil.get_block_id(shareBuffer).toString('hex');
+        this.logger.append('info', 'pool',
+          'Block %s found at height %d by miner %s@%s - submit result: %j',
+          [blockFastHash.substr(0, 6), job.height, login, ip, result]
+        );
+        await this.recordShareData(miner, job, hashDiff.toString(), true, blockFastHash, shareType, blockTemplate);
+        BlockTemplate.jobRefresh(false, this.req, this.logger, this.config);
+      } catch (e) {
+        this.logger.append('error', 'pool', 'Error submitting block at height %d from %s@%s, share type: "%s" - %j', [job.height, login, ip, shareType, e]);
+        await this.recordShareData(miner, job, hashDiff.toString(), false, '', shareType, null);
+
+      }
+
+    } else if (hashDiff.lt(job.difficulty)) {
+      this.logger.append('warn', 'pool', 'Rejected low difficulty share of %s from %s@%s', [hashDiff.toString(), login, ip]);
+      return false;
+    } else {
+      await this.recordShareData(miner, job, hashDiff.toString(), false, '', shareType, null);
+    }
+    return true;
+  }
+
+  async recordShareData(miner: Miner, job: any, shareDiff: String, blockCandidate: any, hashHex: string, shareType: string,
+    blockTemplate: BlockTemplate | null) {
     const hget = promisify(this.redis.hget).bind(this.redis);
     const hset = promisify(this.redis.hset).bind(this.redis);
     const zadd = promisify(this.redis.zadd).bind(this.redis);
@@ -169,6 +235,7 @@ export class Handler {
 
     const dateNow = Date.now();
     const dateNowSeconds = dateNow / 1000 | 0;
+    const { login: address, ip } = miner.attributes;
 
     //Weighting older shares lower than newer ones to prevent pool hopping
     if (this.config.poolServer.slushMining.enabled) {
@@ -191,10 +258,10 @@ export class Handler {
     }
 
     try {
-      await hincrby([this.config.coin, 'shares', 'roundCurrent'].join(':'), miner.login, job.score);
-      await zadd([this.config.coin, 'hashrate'].join(':'), dateNowSeconds, [job.difficulty, miner.login, dateNow].join(':'));
-      await hincrby([this.config.coin, 'workers', miner.login].join(':'), 'hashes', job.difficulty);
-      await hset([this.config.coin, 'workers', miner.login].join(':'), 'lastShare', dateNowSeconds);
+      await hincrby([this.config.coin, 'shares', 'roundCurrent'].join(':'), address, job.score);
+      await zadd([this.config.coin, 'hashrate'].join(':'), dateNowSeconds, [job.difficulty, address, dateNow].join(':'));
+      await hincrby([this.config.coin, 'workers', address].join(':'), 'hashes', job.difficulty);
+      await hset([this.config.coin, 'workers', address].join(':'), 'lastShare', dateNowSeconds);
 
       if (blockCandidate) {
         await hset([this.config.coin, 'stats', 'lastBlockFound'].join(':'), Date.now());
@@ -204,12 +271,14 @@ export class Handler {
           return p + parseInt(workerShares[c])
         }, 0);
         try {
-          await zadd([this.config.coin, 'blocks', 'candidates'].join(':'), job.height, [
-            hashHex,
-            Date.now() / 1000 | 0,
-            blockTemplate.difficulty,
-            totalShares
-          ].join(':'));
+          if (blockTemplate) {
+            await zadd([this.config.coin, 'blocks', 'candidates'].join(':'), job.height, [
+              hashHex,
+              Date.now() / 1000 | 0,
+              blockTemplate.difficulty,
+              totalShares
+            ].join(':'));
+          }
         } catch (e) {
           this.logger.append('error', 'pool', 'Failed inserting block candidate %s \n %j', [hashHex, e]);
         }
@@ -217,64 +286,7 @@ export class Handler {
     } catch (e) {
       this.logger.append('error', 'pool', 'Failed to insert share data into redis %j \n', [e])
     }
-    this.logger.append('info', 'pool', 'Accepted %s share at difficulty %d/%d from %s@%s', [shareType, job.difficulty, shareDiff, miner.login, miner.ip]);
-  }
-
-  async processShare(miner: Miner, job: any, blockTemplate: BlockTemplate, nonce: string, resultHash: string) {
-    const template = new Buffer(blockTemplate.buffer.length);
-    blockTemplate.buffer.copy(template);
-    template.writeUInt32BE(job.extraNonce, blockTemplate.reserveOffset);
-    const shareBuffer = cnUtil.construct_block_blob(template, new Buffer(nonce, 'hex'));
-
-    let convertedBlob;
-    let hash;
-    let shareType: any;
-
-    if (this.shareTrustEnabled && miner.trust.threshold <= 0 && miner.trust.penalty <= 0 && Math.random() > miner.trust.probability) {
-      hash = new Buffer(resultHash, 'hex');
-      shareType = 'trusted';
-    }
-    else {
-      convertedBlob = cnUtil.convert_blob(shareBuffer);
-      hash = cryptoNight(convertedBlob);
-      shareType = 'valid';
-    }
-
-
-    if (hash.toString('hex') !== resultHash) {
-      this.logger.append('warn', 'pool', 'Bad hash from miner %s@%s', [miner.login, miner.ip]);
-      return false;
-    }
-
-    const hashArray = hash.toJSON();
-    hashArray.reverse();
-    const hashNum = bignum.fromBuffer(new Buffer(hashArray));
-    const hashDiff = diff1.div(hashNum);
-
-    if (hashDiff.ge(blockTemplate.difficulty)) {
-      try {
-        const result = await this.req.daemon('/', 'submitblock', [shareBuffer.toString('hex')]);
-        const blockFastHash = cnUtil.get_block_id(shareBuffer).toString('hex');
-        this.logger.append('info', 'pool',
-          'Block %s found at height %d by miner %s@%s - submit result: %j',
-          [blockFastHash.substr(0, 6), job.height, miner.login, miner.ip, result]
-        );
-        this.recordShareData(miner, job, hashDiff.toString(), true, blockFastHash, shareType, blockTemplate);
-        BlockTemplate.jobRefresh(false, this.req, this.logger, this.config);
-      } catch (e) {
-        this.logger.append('error', 'pool', 'Error submitting block at height %d from %s@%s, share type: "%s" - %j', [job.height, miner.login, miner.ip, shareType, e]);
-
-        this.recordShareData(miner, job, hashDiff.toString(), false, null, shareType, null);
-
-      }
-
-    } else if (hashDiff.lt(job.difficulty)) {
-      this.logger.append('warn', 'pool', 'Rejected low difficulty share of %s from %s@%s', [hashDiff.toString(), miner.login, miner.ip]);
-      return false;
-    } else {
-      this.recordShareData(miner, job, hashDiff.toString(), false, null, shareType, null);
-    }
-    return true;
+    this.logger.append('info', 'pool', 'Accepted %s share at difficulty %d/%d from %s@%s', [shareType, job.difficulty, shareDiff, address, ip]);
   }
 
   sendMessage(method: string, params: object) {
@@ -287,7 +299,63 @@ export class Handler {
     this.socket.write(sendData);
   }
 
-  handleMinerMethod(json: any) {
+  async onSubmitJob(miner: Miner, params: any, json: any) {
+    miner.heartbeat();
+
+    const job: any = miner.getJob()
+
+    if (!miner.isValidJob(params.job_id)) {
+      this.reply(json, 'Invalid job id', miner.getJob());
+      return;
+    }
+
+    params.nonce = params.nonce.substr(0, 8).toLowerCase();
+    if (!noncePattern.test(params.nonce)) {
+      miner.invalidSubmit(params, this.server, 'Malformed nonce');
+      this.reply(json, 'Duplicate share', miner.getJob());
+      return;
+    }
+
+    if (job.submissions.indexOf(params.nonce) !== -1) {
+      miner.invalidSubmit(params, this.server, 'Duplicate share');
+      this.reply(json, 'Duplicate share', null);
+      return;
+    }
+
+    job.submissions.push(params.nonce);
+
+    const blockTemplate = BlockTemplate.getJobTemplate(job);
+
+    if (!blockTemplate) {
+      this.reply(json, 'Block expired', null);
+      return;
+    }
+
+    const shareAccepted = await this.processShare(miner, job, blockTemplate, params);
+    this.server.checkBan(shareAccepted, miner.getWoker());
+    // miner.checkBan(shareAccepted);
+
+    miner.trustCheck({
+      shareTrustEnabled: this.shareTrustEnabled,
+      shareAccepted,
+      shareTrustStepFloat: this.shareTrustStepFloat,
+      shareTrustMinFloat: this.shareTrustMinFloat,
+      penalty: this.config.poolServer.shareTrust.penalty
+    });
+
+    if (!shareAccepted) {
+      this.reply(json, 'Low difficulty share', null);
+      return;
+    }
+
+    const now = Date.now() / 1000 | 0;
+    miner.shareTimeRing.append(now - miner.lastShareTime);
+    miner.lastShareTime = now;
+    this.reply(json, null, { status: 'OK' });
+
+  }
+
+  async handleMinerMethod(json: any) {
 
     const { method, params } = json;
 
@@ -296,6 +364,8 @@ export class Handler {
 
 
     const miner = MiningServer.connectedMiners[params.id];
+
+    console.log(miner);
 
     // Check for ban here, so preconnected attackers can't continue to screw you
     const bannedStatus = MiningServer.isBanned(String(this.socket.remoteAddress), this.config);
@@ -325,71 +395,7 @@ export class Handler {
         this.reply(json, null, miner.getJob());
         break;
       case 'submit':
-        miner.heartbeat();
-
-        const job = miner.getJob()
-
-        if (!miner.isValidJob(params.job_id)) {
-          this.reply(json, 'Invalid job id', miner.getJob());
-          return;
-        }
-
-        params.nonce = params.nonce.substr(0, 8).toLowerCase();
-        if (!noncePattern.test(params.nonce)) {
-          const minerText = miner ? (' ' + miner.login + '@' + miner.ip) : '';
-          this.logger.append('warn', 'pool', 'Malformed nonce: ' + JSON.stringify(params) + ' from ' + minerText, []);
-          MiningServer.perIPStats[miner.ip] = { validShares: 0, invalidShares: 999999 };
-          miner.checkBan(false);
-          this.reply(json, 'Duplicate share', miner.getJob());
-          return;
-        }
-
-        if (job.submissions.indexOf(params.nonce) !== -1) {
-          const minerText = miner ? (' ' + miner.login + '@' + miner.ip) : '';
-          this.logger.append('warn', 'pool', 'Duplicate share: ' + JSON.stringify(params) + ' from ' + minerText, []);
-          MiningServer.perIPStats[miner.ip] = { validShares: 0, invalidShares: 999999 };
-          miner.checkBan(false);
-          this.reply(json, 'Duplicate share', null);
-          return;
-        }
-
-        job.submissions.push(params.nonce);
-
-        const blockTemplate = BlockTemplate.getJobTemplate(job);
-
-        if (!blockTemplate) {
-          this.reply(json, 'Block expired', null);
-          return;
-        }
-
-        const shareAccepted = this.processShare(miner, job, blockTemplate, params.nonce, params.result);
-        miner.checkBan(shareAccepted);
-
-        if (this.shareTrustEnabled) {
-          if (shareAccepted) {
-            miner.trust.probability -= this.shareTrustStepFloat;
-            if (miner.trust.probability < this.shareTrustMinFloat)
-              miner.trust.probability = this.shareTrustMinFloat;
-            miner.trust.penalty--;
-            miner.trust.threshold--;
-          }
-          else {
-            this.logger.append('warn', 'pool', 'Share trust broken by %s@%s', [miner.login, miner.ip]);
-            miner.trust.probability = 1;
-            miner.trust.penalty = this.config.poolServer.shareTrust.penalty;
-          }
-        }
-
-        if (!shareAccepted) {
-          this.reply(json, 'Low difficulty share', null);
-          return;
-        }
-
-        const now = Date.now() / 1000 | 0;
-        miner.shareTimeRing.append(now - miner.lastShareTime);
-        miner.lastShareTime = now;
-        this.reply(json, null, { status: 'OK' });
-
+        await this.onSubmitJob(miner, params, json);
         break;
       case 'keepalived':
         miner.heartbeat();
@@ -405,7 +411,7 @@ export class Handler {
     }
   }
 
-  onData(data: Buffer) {
+  async onData(data: Buffer) {
     this.buffer = Buffer.concat([this.buffer, data], this.buffer.length + data.length);
     console.log("data = " + String(this.buffer));
     if (Buffer.byteLength(this.buffer, 'utf8') > 10240) {
@@ -442,7 +448,7 @@ export class Handler {
           this.socket.destroy();
           break;
         }
-        this.handleMesage(jsonData)
+        await this.handleMesage(jsonData)
       }
     }
   }

@@ -4,9 +4,10 @@ import { Handler } from './socket-handler';
 import { Miner } from './miner';
 import { RedisClient } from 'redis';
 
-import { BlockTemplate } from "./block-template";
 import * as net from "net";
 import { promisify } from "util";
+
+import { BlockTemplate } from "./block-template";
 
 // import { Socket } from "net";
 
@@ -45,6 +46,12 @@ export class MiningServer {
   start() {
     this.startRetargetMiners();
     this.startCheckTimeout();
+
+    setTimeout(async () => {
+      await BlockTemplate.jobRefresh(true, this.req, this.logger, this.config);
+    }, 0);
+
+
   }
 
   stop() {

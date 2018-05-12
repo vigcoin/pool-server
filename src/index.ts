@@ -1,4 +1,8 @@
 export * from './server';
+export * from './block-template';
+export * from './miner';
+export * from './socket-handler';
+
 
 import { MiningServer } from "./server";
 

@@ -1,5 +1,5 @@
 import * as crypto from "crypto";
-import * as util from '@vigcoin/cryptonote-util';
+import {convert_blob as convertBlob} from '@vigcoin/cryptonote-util';
 import { PoolRequest } from '@vigcoin/pool-request';
 import { Logger } from '@vigcoin/logger';
 
@@ -16,7 +16,7 @@ export class BlockTemplate {
   extraNonce: number;
 
   public static currentBlockTemplate: BlockTemplate;
-  public static validBlockTemplates: BlockTemplate[];
+  public static validBlockTemplates: BlockTemplate[] = [];
 
   constructor(template: any) {
     this.blob = template.blocktemplate_blob;
@@ -30,7 +30,7 @@ export class BlockTemplate {
 
   nextBlob() {
     this.buffer.writeUInt32BE(++this.extraNonce, this.reserveOffset);
-    return util.convert_blob(this.buffer).toString('hex');
+    return convertBlob(this.buffer).toString('hex');
   }
 
   static async get(req: PoolRequest, config: any) {
@@ -40,13 +40,15 @@ export class BlockTemplate {
 
   static async jobRefresh(loop: boolean = false, req: PoolRequest, logger: Logger, config: any) {
     try {
-      const template = await BlockTemplate.get(req, config);
+      const {result:template} = await BlockTemplate.get(req, config);
+      console.log('template');
+      console.log(template);
       if (!BlockTemplate.currentBlockTemplate || template.height > BlockTemplate.currentBlockTemplate.height) {
         logger.append('info', 'pool', 'New block to mine at height %d w/ difficulty of %d', [template.height, template.difficulty]);
         BlockTemplate.process(template);
       }
     } catch (e) {
-      logger.append('error', 'pool', 'Error polling getblocktemplate %j', [e]);
+      logger.append('error', 'pool', 'Error refreshing: %j', [e]);
       return;
     }
 

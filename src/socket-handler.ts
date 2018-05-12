@@ -359,16 +359,9 @@ export class Handler {
 
     const { method, params } = json;
 
-    console.log('inside method' + method);
-    console.log(params);
-
-
     const miner = MiningServer.connectedMiners[params.id];
 
-    console.log(miner);
-
     // Check for ban here, so preconnected attackers can't continue to screw you
-    console.log(String(this.socket.remoteAddress));
     const bannedStatus = MiningServer.isBanned(String(this.socket.remoteAddress), this.config);
     if (bannedStatus === 0) {
       this.reply(json, 'your IP is banned', null);
@@ -378,13 +371,11 @@ export class Handler {
     }
 
     if (method === 'login') {
-      console.log("inside login");
       this.onLogin(json, params);
       return;
     }
 
     if (!miner) {
-      console.log("inside unauthen");
       this.reply(json, 'Unauthenticated', null);
       return;
 
@@ -414,7 +405,6 @@ export class Handler {
 
   async onData(data: Buffer) {
     this.buffer = Buffer.concat([this.buffer, data], this.buffer.length + data.length);
-    console.log("data = " + String(this.buffer));
     if (Buffer.byteLength(this.buffer, 'utf8') > 10240) {
       // 10KB
       this.buffer = new Buffer('');

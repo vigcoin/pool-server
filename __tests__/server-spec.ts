@@ -6,22 +6,15 @@ import { PoolRequest } from '@vigcoin/pool-request';
 
 import { spawn } from "child_process";
 
-import { onMessage } from "../src/index";
+import { onMessage, BlockTemplate } from "../src/index";
 import { Miner } from "../src/miner";
 
 import * as EventEmitter from "events";
 import * as request from "supertest";
 import * as net from "net";
 
-// import * as fs from 'fs';
 import * as path from 'path';
-// import { promisify } from 'util';
-// import { Router, Request, Response, Application } from 'express';
-// import * as express from 'express';
-// import * as bodyParser from 'body-parser';
 
-// const app: Application = express();
-// const app1: Application = express();
 
 const file = path.resolve(__dirname, './config.json');
 const reader = new ConfigReader(file);
@@ -36,8 +29,9 @@ let { banning, minerTimeout } = config.poolServer;
 
 let id;
 
-
 test('Should create', () => {
+  BlockTemplate.currentBlockTemplate = null;
+  BlockTemplate.validBlockTemplates = [];
   expect(server).toBeTruthy();
 });
 
@@ -429,7 +423,41 @@ test('Should sending HTTP/1.0 4', (done) => {
     });
     client.on("data", (data) => {
       console.log(String(data));
-      
+
+      done();
+    });
+    break;
+  }
+});
+
+test('Should sending HTTP/1.0 4', (done) => {
+  const ip = '::ffff:127.0.0.1';
+  MiningServer.banned[ip] = Date.now();
+  for (const { port, difficulty } of config.poolServer.ports) {
+    const client = net.connect(port, function () {
+      const buffer = Buffer.from('{"method": "submit", "id": "aaa111", "params": {"id": "' + id + '"}}\n\n\nsososss');
+      client.write(buffer);
+    });
+    client.on("data", (data) => {
+      console.log(String(data));
+
+      done();
+    });
+    break;
+  }
+});
+
+test('Should sending HTTP/1.0 4', (done) => {
+  const ip = '::ffff:127.0.0.1';
+  MiningServer.banned[ip] = Date.now() - config.poolServer.banning.time * 1000 - 1000;
+  for (const { port, difficulty } of config.poolServer.ports) {
+    const client = net.connect(port, function () {
+      const buffer = Buffer.from('{"method": "submit", "id": "aaa111", "params": {"id": "' + id + '"}}\n\n\nsososss');
+      client.write(buffer);
+    });
+    client.on("data", (data) => {
+      console.log(String(data));
+
       done();
     });
     break;

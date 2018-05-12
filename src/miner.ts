@@ -9,13 +9,8 @@ import { BlockTemplate } from "./block-template";
 import { v1 } from "uuid";
 import { MiningServer } from "./server";
 
-import * as cnUtil from '@vigcoin/cryptonote-util';
-
-import { cryptonight as cryptoNight } from '@vigcoin/multi-hashing';
-
 import * as bignum from "bignum";
 
-const diff1 = bignum('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16);
 
 
 export class Miner {
@@ -120,7 +115,7 @@ export class Miner {
     return hex;
   }
 
-  pushMessage(method, params) {
+  pushMessage(method:string, params:any) {
     this.handler.sendMessage(method, params);
   };
 

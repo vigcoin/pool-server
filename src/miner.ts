@@ -49,7 +49,7 @@ export class Miner {
     if (difficulty === newDiff) return;
     this.logger.append('info', 'pool', 'Retargetting difficulty %d to %d for %s', [difficulty, newDiff, login]);
     this.attributes.pendingDifficulty = newDiff;
-    // this.pushMessage('job', this.getJob());
+    this.pushMessage('job', this.getJob());
   }
 
   retarget(now: any) {
@@ -107,9 +107,10 @@ export class Miner {
     diffBuff.copy(padded, 32 - diffBuff.length);
 
     const buff = padded.slice(0, 4);
-    let buffArray = buff.toJSON();
-    buffArray.data.reverse();
-    const buffReversed = new Buffer(buffArray.data);
+    let buffArray = new Buffer(buff.length);
+    buff.copy(buffArray);
+    buffArray.reverse();
+    const buffReversed = new Buffer(buffArray);
     this.attributes.target = buffReversed.readUInt32BE(0);
     const hex = buffReversed.toString('hex');
     return hex;

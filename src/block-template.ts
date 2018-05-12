@@ -1,5 +1,5 @@
 import * as crypto from "crypto";
-import {convert_blob as convertBlob} from '@vigcoin/cryptonote-util';
+import { convert_blob as convertBlob } from '@vigcoin/cryptonote-util';
 import { PoolRequest } from '@vigcoin/pool-request';
 import { Logger } from '@vigcoin/logger';
 
@@ -14,11 +14,12 @@ export class BlockTemplate {
   reserveOffset: number;
   buffer: Buffer;
   extraNonce: number;
+  logger: Logger;
 
   public static currentBlockTemplate: BlockTemplate;
   public static validBlockTemplates: BlockTemplate[] = [];
 
-  constructor(template: any) {
+  constructor(template: any, logger: Logger) {
     this.blob = template.blocktemplate_blob;
     this.difficulty = template.difficulty;
     this.height = template.height;
@@ -26,11 +27,16 @@ export class BlockTemplate {
     this.buffer = new Buffer(this.blob, 'hex');
     instanceId.copy(this.buffer, this.reserveOffset + 4, 0, 3);
     this.extraNonce = 0;
+    this.logger = logger;
   }
 
   nextBlob() {
     this.buffer.writeUInt32BE(++this.extraNonce, this.reserveOffset);
-    return convertBlob(this.buffer).toString('hex');
+    try {
+      return convertBlob(this.buffer).toString('hex');
+    } catch (e) {
+        this.logger.append('info', 'pool', 'Error convert Blob', [e]);
+    }
   }
 
   static async get(req: PoolRequest, config: any) {
@@ -40,12 +46,12 @@ export class BlockTemplate {
 
   static async jobRefresh(loop: boolean = false, req: PoolRequest, logger: Logger, config: any) {
     try {
-      const {result:template} = await BlockTemplate.get(req, config);
+      const { result: template } = await BlockTemplate.get(req, config);
       console.log('template');
       console.log(template);
       if (!BlockTemplate.currentBlockTemplate || template.height > BlockTemplate.currentBlockTemplate.height) {
         logger.append('info', 'pool', 'New block to mine at height %d w/ difficulty of %d', [template.height, template.difficulty]);
-        BlockTemplate.process(template);
+        BlockTemplate.process(template, logger);
       }
     } catch (e) {
       logger.append('error', 'pool', 'Error refreshing: %j', [e]);
@@ -58,14 +64,14 @@ export class BlockTemplate {
       }, config.poolServer.blockRefreshInterval);
   }
 
-  static process(template: any) {
+  static process(template: any, logger: Logger) {
     if (BlockTemplate.currentBlockTemplate)
       BlockTemplate.validBlockTemplates.push(BlockTemplate.currentBlockTemplate);
 
     if (BlockTemplate.validBlockTemplates.length > 3)
       BlockTemplate.validBlockTemplates.shift();
 
-    BlockTemplate.currentBlockTemplate = new BlockTemplate(template);
+    BlockTemplate.currentBlockTemplate = new BlockTemplate(template, logger);
     BlockTemplate.notifyMiners();
   }
 
@@ -77,9 +83,12 @@ export class BlockTemplate {
   }
 
   static getJobTemplate(job: any) {
-    return BlockTemplate.currentBlockTemplate.height === job.height ? BlockTemplate.currentBlockTemplate :
-      BlockTemplate.validBlockTemplates.filter(function (t: any) {
-        return t.height === job.height;
-      })[0];
+    if (BlockTemplate.currentBlockTemplate && BlockTemplate.currentBlockTemplate.height === job.height) {
+      return BlockTemplate.currentBlockTemplate;
+    }
+    console.log(BlockTemplate.validBlockTemplates);
+    return BlockTemplate.validBlockTemplates.filter(function (t: any) {
+      return t.height === job.height;
+    })[0]
   }
 }

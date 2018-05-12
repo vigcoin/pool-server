@@ -108,8 +108,8 @@ export class Miner {
 
     const buff = padded.slice(0, 4);
     let buffArray = buff.toJSON();
-    buffArray.reverse();
-    const buffReversed = new Buffer(buffArray);
+    buffArray.data.reverse();
+    const buffReversed = new Buffer(buffArray.data);
     this.attributes.target = buffReversed.readUInt32BE(0);
     const hex = buffReversed.toString('hex');
     return hex;

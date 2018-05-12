@@ -21,7 +21,7 @@
         "enabled": true,
         "clusterForks": "auto",
         "poolAddress": "aaa",
-        "blockRefreshInterval": 1000,
+        "blockRefreshInterval": 100,
         "minerTimeout": 0.1,
         "ports": [
             {

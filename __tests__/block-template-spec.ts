@@ -41,6 +41,8 @@ import * as bodyParser from 'body-parser';
 
 const app: Application = express();
 
+let height = 1;
+
 app.use(bodyParser());
 app.all('/', (req, res) => {
   console.log('inside body parser');
@@ -51,7 +53,7 @@ app.all('/', (req, res) => {
     "result": {
       "blocktemplate_blob": "0100abcdeabcd31231244",
       "difficulty": 1,
-      "height": 1,
+      "height": height++,
       "reserved_offset": 0,
       "status": "OK"
     }
@@ -64,6 +66,23 @@ let daemon;
 
 
 test('Should start daemon', (done) => {
+  MiningServer.connectedMiners['AAA'] = {
+    pushMessage: (method, data) => {
+
+    },
+    getJob: () => {
+
+    }
+  };
+
+  MiningServer.connectedMiners['BBB'] = {
+    pushMessage: (method, data) => {
+
+    },
+    getJob: () => {
+
+    }
+  };
   BlockTemplate.jobRefresh(true, pr, logger, config);
   daemon = app.listen(config.daemon.port, () => {
     console.log('daemon running');
@@ -79,6 +98,28 @@ test('Should start refresh', (done) => {
     done();
 
   }, 1000)
+});
+
+test('Should get block by job height', () => {
+  const block = BlockTemplate.getJobTemplate({
+    height: BlockTemplate.currentBlockTemplate.height
+  });
+  expect(block).toBe(BlockTemplate.currentBlockTemplate);
+  block.nextBlob();
+});
+
+test('Should get block by job height', () => {
+  let tested = false;
+  for (const block of BlockTemplate.validBlockTemplates) {
+    if (block.height !== BlockTemplate.currentBlockTemplate.height) {
+      const block1 = BlockTemplate.getJobTemplate({
+        height: block.height
+      });
+      expect(block1.height !== BlockTemplate.currentBlockTemplate.height).toBeTruthy();
+      tested = true;
+    }
+  }
+  expect(tested).toBeTruthy();
 });
 
 

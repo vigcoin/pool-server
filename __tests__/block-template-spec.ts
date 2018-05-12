@@ -83,7 +83,9 @@ test('Should start daemon', (done) => {
 
     }
   };
-  BlockTemplate.jobRefresh(true, pr, logger, config);
+  expect(BlockTemplate.currentBlockTemplate).toBeFalsy();
+  BlockTemplate.jobRefresh(false, pr, logger, config);
+
   daemon = app.listen(config.daemon.port, () => {
     console.log('daemon running');
     done();
@@ -91,8 +93,9 @@ test('Should start daemon', (done) => {
 });
 
 
-
 test('Should start refresh', (done) => {
+  BlockTemplate.jobRefresh(true, pr, logger, config);
+
   setTimeout(() => {
     expect(BlockTemplate.currentBlockTemplate).toBeTruthy();
     done();
@@ -100,7 +103,20 @@ test('Should start refresh', (done) => {
   }, 1000)
 });
 
+
+test('Should test when template are less higher', (done) => {
+  console.log('inside lesser height')
+  BlockTemplate.currentBlockTemplate.height = 10000;
+  BlockTemplate.jobRefresh(false, pr, logger, config);
+  setTimeout(() => {
+    done();
+  }, 1000);
+});
+
+
 test('Should get block by job height', () => {
+  BlockTemplate.jobRefresh(false, pr, logger, config);
+
   const block = BlockTemplate.getJobTemplate({
     height: BlockTemplate.currentBlockTemplate.height
   });

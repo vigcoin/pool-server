@@ -35,7 +35,7 @@ export class BlockTemplate {
     try {
       return convertBlob(this.buffer).toString('hex');
     } catch (e) {
-        this.logger.append('info', 'pool', 'Error convert Blob', [e]);
+      this.logger.append('info', 'pool', 'Error convert Blob', [e]);
     }
   }
 
@@ -44,12 +44,13 @@ export class BlockTemplate {
     return req.daemon('/', 'getblocktemplate', { reserve_size: 8, wallet_address: config.poolServer.poolAddress });
   }
 
-  static async jobRefresh(loop: boolean = false, req: PoolRequest, logger: Logger, config: any) {
+  static async jobRefresh(loop: boolean, req: PoolRequest, logger: Logger, config: any) {
     try {
       const { result: template } = await BlockTemplate.get(req, config);
-      console.log('template');
-      console.log(template);
-      if (!BlockTemplate.currentBlockTemplate || template.height > BlockTemplate.currentBlockTemplate.height) {
+      if (!BlockTemplate.currentBlockTemplate) {
+        logger.append('info', 'pool', 'New block to mine at height %d w/ difficulty of %d', [template.height, template.difficulty]);
+        BlockTemplate.process(template, logger);
+      } else if (template.height > BlockTemplate.currentBlockTemplate.height) {
         logger.append('info', 'pool', 'New block to mine at height %d w/ difficulty of %d', [template.height, template.difficulty]);
         BlockTemplate.process(template, logger);
       }
@@ -86,7 +87,6 @@ export class BlockTemplate {
     if (BlockTemplate.currentBlockTemplate && BlockTemplate.currentBlockTemplate.height === job.height) {
       return BlockTemplate.currentBlockTemplate;
     }
-    console.log(BlockTemplate.validBlockTemplates);
     return BlockTemplate.validBlockTemplates.filter(function (t: any) {
       return t.height === job.height;
     })[0]

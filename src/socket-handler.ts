@@ -70,98 +70,7 @@ export class Handler {
     });
   }
 
-  async handleMesage(json: any) {
-    if (!json.id) {
-      this.logger.append('warn', this.logName, 'Miner RPC request missing RPC id', []);
-      return;
-    }
-    if (!json.method) {
-      this.logger.append('warn', this.logName, 'Miner RPC request missing RPC method', []);
-      return;
-    }
-    await this.handleMinerMethod(json);
-  }
 
-  reply(json: any, error: any, result: any) {
-    if (!this.socket.writable) {
-      return;
-    }
-
-    let sendData = JSON.stringify({
-      id: json.id,
-      jsonrpc: "2.0",
-      error: error ? { code: -1, message: error } : null,
-      result: result
-    }) + "\n";
-    this.socket.write(sendData);
-  }
-
-  onLogin(json: any, params: any) {
-    let login = params.login;
-    if (!login) {
-      this.reply(json, 'missing login', null);
-      return null;
-    }
-
-    let difficulty = this.difficulty;
-    let noRetarget = false;
-    if (this.config.poolServer.fixedDiff.enabled) {
-      const fixedDiffCharPos = login.indexOf(this.config.poolServer.fixedDiff.addressSeparator);
-      if (fixedDiffCharPos != -1) {
-        noRetarget = true;
-        difficulty = login.substr(fixedDiffCharPos + 1);
-        if (difficulty < this.config.poolServer.varDiff.minDiff) {
-          difficulty = this.config.poolServer.varDiff.minDiff;
-        }
-        login = login.substr(0, fixedDiffCharPos);
-        this.logger.append('info', 'pool', 'Miner difficulty fixed to %s', [String(difficulty)]);
-      }
-    }
-
-    if (this.addressBase58Prefix !== cnUtil.address_decode(new Buffer(login))) {
-      this.reply(json, 'invalid address used for login', null);
-      return;
-    }
-    const id = v1();
-    let trust = null;
-
-    if (this.shareTrustEnabled) {
-      trust = {
-        threshold: this.config.poolServer.shareTrust.threshold,
-        probability: 1,
-        penalty: 0
-      }
-    }
-    let { varDiff, banning } = this.config.poolServer;
-    const variance = varDiff.variancePercent / 100 * varDiff.targetTime;
-    let varDiffNew = {
-      variance: variance,
-      bufferSize: varDiff.retargetTime / varDiff.targetTime * 4,
-      tMin: varDiff.targetTime - variance,
-      tMax: varDiff.targetTime + variance,
-      maxJump: varDiff.maxJump,
-    };
-
-    const banningEnabled = banning && banning.enabled;
-    const miner = new Miner({
-      id, login, pass: params.pass, ip: this.socket.remoteAddress,
-      difficulty, noRetarget, VarDiff: varDiffNew,
-      diff1,
-      // currentBlockTemplate,
-      options: this.config.poolServer,
-      banningEnabled,
-      trust
-    }, this, this.logger);
-    MiningServer.connectedMiners[id] = miner;
-
-    this.reply(json, null, {
-      id,
-      job: miner.getJob(),
-      status: 'OK'
-    });
-    this.logger.append('info', 'pool', 'Miner connected %s@%s', [params.login, this.socket.remoteAddress]);
-    return miner;
-  }
 
   async processShare(miner: Miner, job: any, blockTemplate: BlockTemplate, params: any) {
 
@@ -224,6 +133,27 @@ export class Handler {
     return true;
   }
 
+  async onSubmitJob(miner: Miner, params: any, json: any) {
+    miner.heartbeat();
+
+    const job: any = miner.getJob()
+
+    if (!this.checkSubmit(miner, params, json, job)) {
+      return;
+    }
+
+    job.submissions.push(params.nonce);
+
+    const blockTemplate = BlockTemplate.getJobTemplate(job);
+
+    if (!blockTemplate) {
+      this.reply(json, 'Block expired', null);
+      return;
+    }
+    const shareAccepted = await this.processShare(miner, job, blockTemplate, params);
+    this.submit(shareAccepted, miner, json);
+  }
+
   async recordShareData(miner: Miner, job: any, shareDiff: String, blockCandidate: any, hashHex: string, shareType: string,
     blockTemplate: BlockTemplate | null) {
     const hget = promisify(this.redis.hget).bind(this.redis);
@@ -270,18 +200,11 @@ export class Handler {
         const totalShares = Object.keys(workerShares).reduce(function (p, c) {
           return p + parseInt(workerShares[c])
         }, 0);
-        try {
-          if (blockTemplate) {
-            await zadd([this.config.coin, 'blocks', 'candidates'].join(':'), job.height, [
-              hashHex,
-              Date.now() / 1000 | 0,
-              blockTemplate.difficulty,
-              totalShares
-            ].join(':'));
-          }
-        } catch (e) {
-          this.logger.append('error', 'pool', 'Failed inserting block candidate %s \n %j', [hashHex, e]);
-        }
+
+        this.updateBlockCandiates(this.redis, blockTemplate,
+          job,
+          hashHex,
+          totalShares);
       }
     } catch (e) {
       this.logger.append('error', 'pool', 'Failed to insert share data into redis %j \n', [e])
@@ -289,8 +212,133 @@ export class Handler {
     this.logger.append('info', 'pool', 'Accepted %s share at difficulty %d/%d from %s@%s', [shareType, job.difficulty, shareDiff, address, ip]);
   }
 
+  public async updateBlockCandiates(redis: RedisClient, blockTemplate: any | null, job: any, hashHex: string, totalShares: number) {
+    if (!blockTemplate) {
+      return;
+    }
+    try {
+      const zadd = promisify(redis.zadd).bind(redis);
+      await zadd([this.config.coin, 'blocks', 'candidates'].join(':'), job.height, [
+        hashHex,
+        Date.now() / 1000,
+        blockTemplate.difficulty,
+        totalShares
+      ].join(':'));
+    } catch (e) {
+      this.logger.append('error', 'pool', 'Failed inserting block candidate %s \n %j', [hashHex, e]);
+    }
+  }
+
+  public onLogin(json: any, params: any) {
+    let login = params.login;
+    if (!login) {
+      this.reply(json, 'missing login', null);
+      return null;
+    }
+
+    const { difficulty, noRetarget } = this.changeDiff(login, this.config.poolServer, this.difficulty);
+
+    if (this.addressBase58Prefix !== cnUtil.address_decode(new Buffer(login))) {
+      this.reply(json, 'invalid address used for login', null);
+      return;
+    }
+    const id = v1();
+    let trust = null;
+
+    if (this.shareTrustEnabled) {
+      trust = {
+        threshold: this.config.poolServer.shareTrust.threshold,
+        probability: 1,
+        penalty: 0
+      }
+    }
+    let { varDiff, banning } = this.config.poolServer;
+    const variance = varDiff.variancePercent / 100 * varDiff.targetTime;
+    let varDiffNew = {
+      variance: variance,
+      bufferSize: varDiff.retargetTime / varDiff.targetTime * 4,
+      tMin: varDiff.targetTime - variance,
+      tMax: varDiff.targetTime + variance,
+      maxJump: varDiff.maxJump,
+    };
+
+    const banningEnabled = banning && banning.enabled;
+    const miner = new Miner({
+      score: 1, diffHex: 'e',
+      id, login, pass: params.pass, ip: this.socket.remoteAddress,
+      difficulty, noRetarget, VarDiff: varDiffNew,
+      diff1,
+      // currentBlockTemplate,
+      options: this.config.poolServer,
+      banningEnabled,
+      trust
+    }, this, this.logger);
+    MiningServer.connectedMiners[id] = miner;
+
+    this.reply(json, null, {
+      id,
+      job: miner.getJob(),
+      status: 'OK'
+    });
+    this.logger.append('info', 'pool', 'Miner connected %s@%s', [params.login, this.socket.remoteAddress]);
+    return miner;
+  }
+
+  public changeDiff(login: any, poolServer: any, difficulty: number) {
+    // let difficulty = this.difficulty;
+    let noRetarget = false;
+    if (poolServer.fixedDiff.enabled) {
+      const fixedDiffCharPos = login.indexOf(poolServer.fixedDiff.addressSeparator);
+      if (fixedDiffCharPos != -1) {
+        noRetarget = true;
+        difficulty = login.substr(fixedDiffCharPos + 1);
+        if (difficulty < poolServer.varDiff.minDiff) {
+          difficulty = poolServer.varDiff.minDiff;
+        }
+        login = login.substr(0, fixedDiffCharPos);
+        this.logger.append('info', 'pool', 'Miner difficulty fixed to %s', [String(difficulty)]);
+      }
+    }
+    return { difficulty, noRetarget };
+  }
+
+  async handleMesage(json: any) {
+    if (!json.id) {
+      this.logger.append('warn', this.logName, 'Miner RPC request missing RPC id', []);
+      return;
+    }
+    if (!json.method) {
+      this.logger.append('warn', this.logName, 'Miner RPC request missing RPC method', []);
+      return;
+    }
+    await this.handleMinerMethod(json);
+  }
+
+  public closeSocket() {
+    this.socket.end();
+    console.log("socket.end called");
+  }
+
+  public reply(json: any, error: any, result: any) {
+    if (!this.socket.writable) {
+      return;
+    }
+    let sendData = JSON.stringify({
+      id: json.id,
+      jsonrpc: "2.0",
+      error: error ? { code: -1, message: error } : null,
+      result: result
+    }) + "\n";
+    this.socket.write(sendData);
+  }
+
   sendMessage(method: string, params: object) {
-    if (!this.socket.writable) return;
+    console.log("writable: " + this.socket.writable);
+
+    if (!this.socket.writable) {
+      console.log("writable");
+      return;
+    }
     var sendData = JSON.stringify({
       jsonrpc: "2.0",
       method: method,
@@ -299,42 +347,9 @@ export class Handler {
     this.socket.write(sendData);
   }
 
-  async onSubmitJob(miner: Miner, params: any, json: any) {
-    miner.heartbeat();
-
-    const job: any = miner.getJob()
-
-    if (!miner.isValidJob(params.job_id)) {
-      this.reply(json, 'Invalid job id', miner.getJob());
-      return;
-    }
-
-    params.nonce = params.nonce.substr(0, 8).toLowerCase();
-    if (!noncePattern.test(params.nonce)) {
-      miner.invalidSubmit(params, this.server, 'Malformed nonce');
-      this.reply(json, 'Duplicate share', miner.getJob());
-      return;
-    }
-
-    if (job.submissions.indexOf(params.nonce) !== -1) {
-      miner.invalidSubmit(params, this.server, 'Duplicate share');
-      this.reply(json, 'Duplicate share', null);
-      return;
-    }
-
-    job.submissions.push(params.nonce);
-
-    const blockTemplate = BlockTemplate.getJobTemplate(job);
-
-    if (!blockTemplate) {
-      this.reply(json, 'Block expired', null);
-      return;
-    }
-
-    const shareAccepted = await this.processShare(miner, job, blockTemplate, params);
+  public submit(shareAccepted: boolean, miner: Miner, json: any) {
     this.server.checkBan(shareAccepted, miner.getWoker());
     // miner.checkBan(shareAccepted);
-
     miner.trustCheck({
       shareTrustEnabled: this.shareTrustEnabled,
       shareAccepted,
@@ -347,12 +362,34 @@ export class Handler {
       this.reply(json, 'Low difficulty share', null);
       return;
     }
+    this.sendOK(miner, json);
+  }
 
-    const now = Date.now() / 1000 | 0;
+  public sendOK(miner: Miner, json: any) {
+    const now = Date.now() / 1000;
     miner.shareTimeRing.append(now - miner.lastShareTime);
     miner.lastShareTime = now;
     this.reply(json, null, { status: 'OK' });
+  }
 
+  public checkSubmit(miner: Miner, params: any, json: any, job: any) {
+    if (!miner.isValidJob(params.job_id)) {
+      this.reply(json, 'Invalid job id', miner.getJob());
+      return false;
+    }
+    params.nonce = params.nonce.substr(0, 8).toLowerCase();
+    if (!noncePattern.test(params.nonce)) {
+      miner.invalidSubmit(params, this.server, 'Malformed nonce');
+      this.reply(json, 'Duplicate share', miner.getJob());
+      return false;
+    }
+
+    if (job.submissions.indexOf(params.nonce) !== -1) {
+      miner.invalidSubmit(params, this.server, 'Duplicate share');
+      this.reply(json, 'Duplicate share', null);
+      return false;
+    }
+    return true;
   }
 
   async handleMinerMethod(json: any) {
@@ -397,7 +434,7 @@ export class Handler {
         break;
       default:
         this.reply(json, "invalid method", null);
-        const minerText = miner ? miner.getUserAddress() : '';
+        const minerText = miner.getUserAddress();
         this.logger.append('warn', 'pool', 'Invalid method: %s (%j) from %s', [method, params, minerText]);
         break;
     }

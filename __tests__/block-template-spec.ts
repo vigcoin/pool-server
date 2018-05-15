@@ -45,8 +45,6 @@ let height = 1;
 
 app.use(bodyParser());
 app.all('/', (req, res) => {
-  console.log('inside body parser');
-  console.log(req.body);
   const json = {
     "id": "test",
     "jsonrpc": "2.0",
@@ -105,7 +103,6 @@ test('Should start refresh', (done) => {
 
 
 test('Should test when template are less higher', (done) => {
-  console.log('inside lesser height')
   BlockTemplate.currentBlockTemplate.height = 10000;
   BlockTemplate.jobRefresh(false, pr, logger, config);
   setTimeout(() => {

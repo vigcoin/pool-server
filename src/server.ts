@@ -47,7 +47,7 @@ export class MiningServer {
     this.startRetargetMiners();
     this.startCheckTimeout();
 
-    setTimeout(async () => {
+    setImmediate(async () => {
       await BlockTemplate.jobRefresh(true, this.req, this.logger, this.config);
     }, 0);
 
@@ -80,8 +80,7 @@ export class MiningServer {
         if (process.send) {
           process.send({ type: 'banIP', ip });
         }
-      }
-      else {
+      } else {
         stats.invalidShares = 0;
         stats.validShares = 0;
       }

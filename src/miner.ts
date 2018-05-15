@@ -17,7 +17,7 @@ export class Miner {
   public attributes: any = {};
   public trust: any = {};
   handler: Handler
-  validJobs: any = [];
+  public validJobs: any = [];
   shareTimeRing: RingBuffer;
   lastShareTime = Date.now() / 1000;
   public lastBeat = Date.now();
@@ -34,7 +34,7 @@ export class Miner {
     this.trust = {};
   }
 
-  timedout() {
+  public timedout() {
     const { login, ip } = this.attributes;
     this.logger.append('warn', 'pool', 'Miner timed out and disconnected %s@%s', [login, ip]);
   }
@@ -42,8 +42,8 @@ export class Miner {
     this.lastBeat = Date.now();
   }
 
-  setNewDiff(newDiff: number) {
-    const { VarDiff, difficulty, login } = this.attributes;
+  setNewDiff(newDiff: number, attributes: any) {
+    const { difficulty, login } = attributes;
 
     newDiff = Math.round(newDiff);
     if (difficulty === newDiff) return;
@@ -55,39 +55,44 @@ export class Miner {
   retarget(now: any) {
 
     const { difficulty, options: config, VarDiff } = this.attributes;
-
-    const { varDiff: options } = config;
-
+    const { varDiff: options } = config.poolServer;
     const sinceLast = now - this.lastShareTime;
     const decreaser = sinceLast > VarDiff.tMax;
-
     const avg = this.shareTimeRing.avg(decreaser ? sinceLast : 0);
-    let newDiff;
+    let redirected = this.isRedirected(avg, options, this.attributes);
 
+    if (redirected === false) {
+      return false;
+    }
+
+    const { newDiff } = redirected;
+
+    this.setNewDiff(newDiff, this.attributes);
+    this.shareTimeRing.clear();
+    if (decreaser) this.lastShareTime = now;
+  }
+
+  public isRedirected(avg: number, options: any, attributes: any) {
     let direction;
+    let newDiff;
+    const { difficulty, VarDiff } = attributes;
+    newDiff = options.targetTime / avg * difficulty;
 
     if (avg > VarDiff.tMax && difficulty > options.minDiff) {
-      newDiff = options.targetTime / avg * difficulty;
       newDiff = newDiff > options.minDiff ? newDiff : options.minDiff;
       direction = -1;
-    }
-    else if (avg < VarDiff.tMin && difficulty < options.maxDiff) {
-      newDiff = options.targetTime / avg * difficulty;
+    } else if (avg < VarDiff.tMin && difficulty < options.maxDiff) {
       newDiff = newDiff < options.maxDiff ? newDiff : options.maxDiff;
       direction = 1;
-    }
-    else {
-      return;
+    } else {
+      return false;
     }
 
     if (Math.abs(newDiff - difficulty) / difficulty * 100 > options.maxJump) {
       const change = options.maxJump / 100 * difficulty * direction;
       newDiff = difficulty + change;
     }
-
-    this.setNewDiff(newDiff);
-    this.shareTimeRing.clear();
-    if (decreaser) this.lastShareTime = now;
+    return { newDiff, direction };
   }
 
 
@@ -116,12 +121,13 @@ export class Miner {
     return hex;
   }
 
-  pushMessage(method:string, params:any) {
+  pushMessage(method: string, params: any) {
     this.handler.sendMessage(method, params);
   };
 
 
   getJob() {
+
     const { score, diffHex, difficulty, lastBlockHeight, pendingDifficulty } = this.attributes;
     const currentBlockTemplate = BlockTemplate.currentBlockTemplate;
 
@@ -156,9 +162,9 @@ export class Miner {
     };
 
     this.validJobs.push(newJob);
-
-    if (this.validJobs.length > 4)
+    if (this.validJobs.length > 4) {
       this.validJobs.shift();
+    }
 
     return {
       blob: blob,
@@ -192,18 +198,18 @@ export class Miner {
 
   trustCheck(config: any) {
     const { shareTrustEnabled, shareAccepted, shareTrustStepFloat, shareTrustMinFloat, penalty } = config;
-    const { login: address, ip } = this.attributes;
+    const { login: address, ip, trust } = this.attributes;
     if (shareTrustEnabled) {
       if (shareAccepted) {
-        this.trust.probability -= shareTrustStepFloat;
-        if (this.trust.probability < shareTrustMinFloat)
-          this.trust.probability = shareTrustMinFloat;
-        this.trust.penalty--;
-        this.trust.threshold--;
+        trust.probability -= shareTrustStepFloat;
+        if (trust.probability < shareTrustMinFloat)
+          trust.probability = shareTrustMinFloat;
+        trust.penalty--;
+        trust.threshold--;
       }
       else {
-        this.trust.probability = 1;
-        this.trust.penalty = penalty;
+        trust.probability = 1;
+        trust.penalty = penalty;
         this.logger.append('warn', 'pool', 'Share trust broken by %s@%s', [address, ip]);
       }
     }

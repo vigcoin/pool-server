@@ -345,19 +345,6 @@ test('Should sending HTTP/1.0 1', (done) => {
   }
 });
 
-// test('Should sending HTTP/1.0 1', (done) => {
-//   for (const { port, difficulty } of config.poolServer.ports) {
-//     const client = net.connect(port, function () {
-//       const buffer = Buffer.from('\n\nsososss');
-//       client.write(buffer);
-//     });
-//     setTimeout(() => {
-//       done();
-//     }, 500);
-//     break;
-//   }
-// });
-
 test('Should sending HTTP/1.0 2', (done) => {
   for (const { port, difficulty } of config.poolServer.ports) {
     const client = net.connect(port, function () {

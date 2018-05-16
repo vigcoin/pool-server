@@ -8,10 +8,9 @@ import { RingBuffer } from "./ring-buffer";
 import { BlockTemplate } from "./block-template";
 import { v1 } from "uuid";
 import { MiningServer } from "./server";
+import { RedisClient } from 'redis';
 
 import * as bignum from "bignum";
-
-
 
 export class Miner {
   public attributes: any = {};
@@ -218,6 +217,18 @@ export class Miner {
   getUserAddress() {
     const { ip, login } = this.attributes;
     return ' ' + login + '@' + ip;
+
+  }
+
+  async recordShare(redis: RedisClient, coin: string, address: string, job: any, dateNow: number) {
+    const hset = promisify(redis.hset).bind(redis);
+    const hincrby = promisify(redis.hincrby).bind(redis);
+    const zadd = promisify(redis.zadd).bind(redis);
+
+    await hincrby([coin, 'shares', 'roundCurrent'].join(':'), address, job.score);
+    await hincrby([coin, 'workers', address].join(':'), 'hashes', job.difficulty);
+    await hset([coin, 'workers', address].join(':'), 'lastShare', dateNow / 1000);
+    await zadd([coin, 'hashrate'].join(':'), dateNow / 1000, [job.difficulty, address, dateNow].join(':'));
 
   }
 }

@@ -316,6 +316,10 @@ test('Should updateBlockCandiates ', () => {
   handler.onLogin({}, { login: 'BKBEpnt8FzaUxKZxydESczXRqWGAhGmXKCkYL6XoTMiTDm4h3bjCy72fgbnWpUfGGSEhUTeWoZc8v8S4s18nkmbKMypELLg' });
 });
 
+test('Should  record share', async () => {
+  await miner.recordShare(redis, config.coin, 'aaaa', {score: 10, difficulty: 1000}, Date.now());
+});
+
 test('Should close all', () => {
   // client.close();
   BlockTemplate.currentBlockTemplate = null;

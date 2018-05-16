@@ -136,6 +136,14 @@ test('Should get block by job height', () => {
 });
 
 
+test('Should get share Buffer', () => {
+  const block = BlockTemplate.getJobTemplate({
+    height: BlockTemplate.currentBlockTemplate.height
+  });
+  block.shareBuffer({}, {nonce: 'aaa1'}, logger);
+});
+
+
 test('Should close all', () => {
   daemon.close();
   redis.quit();

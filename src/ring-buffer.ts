@@ -8,7 +8,7 @@ export class RingBuffer {
     this.maxSize = maxSize;
 
   }
-  append(x: any) {
+  public append(x: any) {
     if (this.isFull) {
       this.data[this.cursor] = x;
       this.cursor = (this.cursor + 1) % this.maxSize;
@@ -23,14 +23,14 @@ export class RingBuffer {
     }
   }
 
-  avg(plusOne: number) {
+  public avg(plusOne: number) {
     var sum = this.data.reduce(function (a: any, b: any) { return a + b }, plusOne || 0);
     return sum / ((this.isFull ? this.maxSize : this.cursor) + (plusOne ? 1 : 0));
   }
-  size() {
+  public size() {
     return this.isFull ? this.maxSize : this.cursor;
   }
-  clear() {
+  public clear() {
     this.data = [];
     this.cursor = 0;
     this.isFull = false;

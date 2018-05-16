@@ -1,5 +1,5 @@
 import * as crypto from "crypto";
-import { convert_blob as convertBlob } from '@vigcoin/cryptonote-util';
+import { convert_blob as convertBlob, construct_block_blob as cbb } from '@vigcoin/cryptonote-util';
 import { PoolRequest } from '@vigcoin/pool-request';
 import { Logger } from '@vigcoin/logger';
 
@@ -90,5 +90,16 @@ export class BlockTemplate {
     return BlockTemplate.validBlockTemplates.filter(function (t: any) {
       return t.height === job.height;
     })[0]
+  }
+
+  shareBuffer(job: any, params: any, logger: Logger) {
+    const template = new Buffer(this.buffer.length);
+    this.buffer.copy(template);
+    template.writeUInt32BE(job.extraNonce, this.reserveOffset);
+    try {
+      return cbb(template, new Buffer(params.nonce, 'hex'));
+    } catch (e) {
+      logger.append('error', 'pool', 'get share buffer error', [e]);
+    }
   }
 }

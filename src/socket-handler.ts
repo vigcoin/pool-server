@@ -19,7 +19,6 @@ import { BlockTemplate } from './block-template';
 import { MiningServer } from './server';
 
 
-const noncePattern = new RegExp("^[0-9A-Fa-f]{8}$");
 
 let scoreTime: any;
 let lastChecked = 0;
@@ -71,6 +70,60 @@ export class Handler {
   }
 
 
+  async recordShareData(miner: Miner, job: any, shareDiff: String, blockCandidate: any, hashHex: string, shareType: string,
+    blockTemplate: BlockTemplate | null) {
+    const hget = promisify(this.redis.hget).bind(this.redis);
+    const hset = promisify(this.redis.hset).bind(this.redis);
+    const zadd = promisify(this.redis.zadd).bind(this.redis);
+    const hincrby = promisify(this.redis.hincrby).bind(this.redis);
+    const rename = promisify(this.redis.rename).bind(this.redis);
+    const hgetall = promisify(this.redis.hgetall).bind(this.redis);
+
+    const dateNow = Date.now();
+    const dateNowSeconds = dateNow / 1000;
+    const { login: address, ip } = miner.attributes;
+
+    //Weighting older shares lower than newer ones to prevent pool hopping
+    if (this.config.poolServer.slushMining.enabled) {
+      if (lastChecked + this.config.poolServer.slushMining.lastBlockCheckRate <= dateNowSeconds || lastChecked == 0) {
+        try {
+          const result = await hget([this.config.coin, 'stats'].join(':'), 'lastBlockFound');
+          scoreTime = result / 1000 | 0; //scoreTime could potentially be something else than the beginning of the current round, though this would warrant changes in api.js (and potentially the redis db)
+          lastChecked = dateNowSeconds;
+        } catch (e) {
+          this.logger.append('error', 'pool', 'Unable to determine the timestamp of the last block found', []);
+          return;
+        }
+      }
+
+      job.score = job.difficulty * Math.pow(Math.E, ((scoreTime - dateNowSeconds) / this.config.poolServer.slushMining.weight)); //Score Calculation
+      this.logger.append('info', 'pool', 'Submitted score ' + job.score + ' with difficulty ' + job.difficulty + ' and the time ' + scoreTime, []);
+    }
+    else {
+      job.score = job.difficulty;
+    }
+
+    try {
+      await miner.recordShare(this.redis, this.config.coin,
+        address, job, dateNow);
+      if (blockCandidate) {
+        await hset([this.config.coin, 'stats', 'lastBlockFound'].join(':'), Date.now());
+        await rename([this.config.coin, 'shares', 'roundCurrent'].join(':'), this.config.coin + ':shares:round' + job.height);
+        const workerShares = await hgetall([this.config.coin, 'shares', 'round', job.height].join(':'));
+        const totalShares = Object.keys(workerShares).reduce(function (p, c) {
+          return p + parseInt(workerShares[c])
+        }, 0);
+
+        this.updateBlockCandiates(this.redis, blockTemplate,
+          job,
+          hashHex,
+          totalShares);
+      }
+    } catch (e) {
+      this.logger.append('error', 'pool', 'Failed to insert share data into redis %j \n', [e])
+    }
+    this.logger.append('info', 'pool', 'Accepted %s share at difficulty %d/%d from %s@%s', [shareType, job.difficulty, shareDiff, address, ip]);
+  }
 
   async processShare(miner: Miner, job: any, blockTemplate: BlockTemplate, params: any) {
 
@@ -78,11 +131,8 @@ export class Handler {
     const { login, ip } = miner.attributes;
 
     // nonce: string, resultHash: string
-    const template = new Buffer(blockTemplate.buffer.length);
-    blockTemplate.buffer.copy(template);
-    template.writeUInt32BE(job.extraNonce, blockTemplate.reserveOffset);
-    const shareBuffer = cnUtil.construct_block_blob(template, new Buffer(nonce, 'hex'));
 
+    const shareBuffer = blockTemplate.shareBuffer(job, params, this.logger);
     let convertedBlob;
     let hash;
     let shareType: any;
@@ -137,7 +187,7 @@ export class Handler {
     miner.heartbeat();
 
     const job: any = miner.getJob()
-
+    console.log(params, json, job);
     if (!this.checkSubmit(miner, params, json, job)) {
       return;
     }
@@ -154,63 +204,7 @@ export class Handler {
     this.submit(shareAccepted, miner, json);
   }
 
-  async recordShareData(miner: Miner, job: any, shareDiff: String, blockCandidate: any, hashHex: string, shareType: string,
-    blockTemplate: BlockTemplate | null) {
-    const hget = promisify(this.redis.hget).bind(this.redis);
-    const hset = promisify(this.redis.hset).bind(this.redis);
-    const zadd = promisify(this.redis.zadd).bind(this.redis);
-    const hincrby = promisify(this.redis.hincrby).bind(this.redis);
-    const rename = promisify(this.redis.rename).bind(this.redis);
-    const hgetall = promisify(this.redis.hgetall).bind(this.redis);
 
-    const dateNow = Date.now();
-    const dateNowSeconds = dateNow / 1000 | 0;
-    const { login: address, ip } = miner.attributes;
-
-    //Weighting older shares lower than newer ones to prevent pool hopping
-    if (this.config.poolServer.slushMining.enabled) {
-      if (lastChecked + this.config.poolServer.slushMining.lastBlockCheckRate <= dateNowSeconds || lastChecked == 0) {
-        try {
-          const result = await hget([this.config.coin, 'stats'].join(':'), 'lastBlockFound');
-          scoreTime = result / 1000 | 0; //scoreTime could potentially be something else than the beginning of the current round, though this would warrant changes in api.js (and potentially the redis db)
-          lastChecked = dateNowSeconds;
-        } catch (e) {
-          this.logger.append('error', 'pool', 'Unable to determine the timestamp of the last block found', []);
-          return;
-        }
-      }
-
-      job.score = job.difficulty * Math.pow(Math.E, ((scoreTime - dateNowSeconds) / this.config.poolServer.slushMining.weight)); //Score Calculation
-      this.logger.append('info', 'pool', 'Submitted score ' + job.score + ' with difficulty ' + job.difficulty + ' and the time ' + scoreTime, []);
-    }
-    else {
-      job.score = job.difficulty;
-    }
-
-    try {
-      await hincrby([this.config.coin, 'shares', 'roundCurrent'].join(':'), address, job.score);
-      await zadd([this.config.coin, 'hashrate'].join(':'), dateNowSeconds, [job.difficulty, address, dateNow].join(':'));
-      await hincrby([this.config.coin, 'workers', address].join(':'), 'hashes', job.difficulty);
-      await hset([this.config.coin, 'workers', address].join(':'), 'lastShare', dateNowSeconds);
-
-      if (blockCandidate) {
-        await hset([this.config.coin, 'stats', 'lastBlockFound'].join(':'), Date.now());
-        await rename([this.config.coin, 'shares', 'roundCurrent'].join(':'), this.config.coin + ':shares:round' + job.height);
-        const workerShares = await hgetall([this.config.coin, 'shares', 'round', job.height].join(':'));
-        const totalShares = Object.keys(workerShares).reduce(function (p, c) {
-          return p + parseInt(workerShares[c])
-        }, 0);
-
-        this.updateBlockCandiates(this.redis, blockTemplate,
-          job,
-          hashHex,
-          totalShares);
-      }
-    } catch (e) {
-      this.logger.append('error', 'pool', 'Failed to insert share data into redis %j \n', [e])
-    }
-    this.logger.append('info', 'pool', 'Accepted %s share at difficulty %d/%d from %s@%s', [shareType, job.difficulty, shareDiff, address, ip]);
-  }
 
   public async updateBlockCandiates(redis: RedisClient, blockTemplate: any | null, job: any, hashHex: string, totalShares: number) {
     if (!blockTemplate) {
@@ -378,6 +372,8 @@ export class Handler {
       return false;
     }
     params.nonce = params.nonce.substr(0, 8).toLowerCase();
+    const noncePattern = new RegExp("^[0-9A-Fa-f]{8}$");
+
     if (!noncePattern.test(params.nonce)) {
       miner.invalidSubmit(params, this.server, 'Malformed nonce');
       this.reply(json, 'Duplicate share', miner.getJob());

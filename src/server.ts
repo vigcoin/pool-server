@@ -4,10 +4,10 @@ import { Handler } from './socket-handler';
 import { Miner } from './miner';
 import { RedisClient } from 'redis';
 
-import * as net from "net";
-import { promisify } from "util";
+import * as net from 'net';
+import { promisify } from 'util';
 
-import { BlockTemplate } from "./block-template";
+import { BlockTemplate } from './block-template';
 
 // import { Socket } from "net";
 
@@ -18,25 +18,38 @@ export class MiningServer {
   logger: Logger;
 
   req: PoolRequest;
-  logName: 'pool';
-  retargetTimer: NodeJS.Timer;
-  checkMinerTimer: NodeJS.Timer;
-  timeoutInterval: number = 30000;   // in case configuration file is not configurated.
+  logName = 'pool';
+  retargetTimer?: NodeJS.Timer;
+  checkMinerTimer?: NodeJS.Timer;
+  timeoutInterval: number = 30000; // in case configuration file is not configurated.
 
   public static perIPStats: any = {};
   public static banned: any = {};
   public static connectedMiners: any = {};
   public static handlers: any = [];
 
-  constructor(config: any, logger: Logger, poolRequest: PoolRequest, redis: RedisClient) {
+  constructor(
+    config: any,
+    logger: Logger,
+    poolRequest: PoolRequest,
+    redis: RedisClient
+  ) {
     this.config = config;
     this.logger = logger;
     this.req = poolRequest;
     for (const { port, difficulty } of this.config.poolServer.ports) {
-
-      const server = net.createServer(async (socket) => {
+      const server = net.createServer(async socket => {
         MiningServer.handlers.push(
-          new Handler(this, this.config, port, difficulty, socket, logger, poolRequest, redis)
+          new Handler(
+            this,
+            this.config,
+            port,
+            difficulty,
+            socket,
+            logger,
+            poolRequest,
+            redis
+          )
         );
       });
       this.servers[port] = server;
@@ -50,17 +63,18 @@ export class MiningServer {
     setImmediate(async () => {
       await BlockTemplate.jobRefresh(true, this.req, this.logger, this.config);
     }, 0);
-
-
   }
 
   stop() {
-    clearInterval(this.retargetTimer);
-    clearInterval(this.checkMinerTimer);
+    if (this.retargetTimer) {
+      clearInterval(this.retargetTimer);
+    }
+    if (this.checkMinerTimer) {
+      clearInterval(this.checkMinerTimer);
+    }
   }
 
   public checkBan(validShare: boolean, worker: any) {
-
     const { banning } = this.config.poolServer;
     const { ip, id, address } = worker;
     if (!banning.enabled) return;
@@ -73,7 +87,10 @@ export class MiningServer {
     const stats = MiningServer.perIPStats[ip];
     validShare ? stats.validShares++ : stats.invalidShares++;
     if (stats.validShares + stats.invalidShares >= banning.checkThreshold) {
-      if (stats.invalidShares / stats.validShares >= banning.invalidPercent / 100) {
+      if (
+        stats.invalidShares / stats.validShares >=
+        banning.invalidPercent / 100
+      ) {
         // this.logger.append('warn', 'pool', 'Banned %s@%s', [address, ip]);
         MiningServer.banned[ip] = Date.now();
         delete MiningServer.connectedMiners[id];
@@ -93,8 +110,7 @@ export class MiningServer {
     const timeLeft = config.poolServer.banning.time * 1000 - bannedTimeAgo;
     if (timeLeft > 0) {
       return 0;
-    }
-    else {
+    } else {
       delete MiningServer.banned[ip];
       return -1;
     }
@@ -107,7 +123,7 @@ export class MiningServer {
   }
 
   retargetMiners() {
-    const now = Date.now() / 1000 | 0;
+    const now = (Date.now() / 1000) | 0;
     for (const minerId of Object.keys(MiningServer.connectedMiners)) {
       const miner = MiningServer.connectedMiners[minerId];
       if (!miner.noRetarget) {
@@ -121,7 +137,6 @@ export class MiningServer {
     this.checkMinerTimer = setInterval(() => {
       this.checkTimeOutMiners();
     }, timeoutInterval || this.timeoutInterval);
-
   }
 
   removeBanned(now: any, banning: any) {
@@ -162,7 +177,12 @@ export class MiningServer {
       const listen = promisify(server.listen).bind(server);
       // try {
       await listen(port);
-      this.logger.append('info', 'pool', 'Started server listening on port %d', [port]);
+      this.logger.append(
+        'info',
+        'pool',
+        'Started server listening on port %d',
+        [port]
+      );
       // } catch (e) {
       //   this.logger.append('info', 'pool', 'Could not start server listening on port %d, error: $j', [port, e]);
       // }

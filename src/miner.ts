@@ -1,21 +1,21 @@
-import * as net from "net";
-import { Socket } from "net";
-import { promisify } from "util";
+import * as net from 'net';
+import { Socket } from 'net';
+import { promisify } from 'util';
 import { Logger } from '@vigcoin/logger';
 import { Handler } from './socket-handler';
 
-import { RingBuffer } from "./ring-buffer";
-import { BlockTemplate } from "./block-template";
-import { v1 } from "uuid";
-import { MiningServer } from "./server";
+import { RingBuffer } from './ring-buffer';
+import { BlockTemplate } from './block-template';
+import { v1 } from 'uuid';
+import { MiningServer } from './server';
 import { RedisClient } from 'redis';
 
-import * as bignum from "bignum";
+import * as bignum from 'bignum';
 
 export class Miner {
   public attributes: any = {};
   public trust: any = {};
-  handler: Handler
+  handler: Handler;
   public validJobs: any = [];
   shareTimeRing: RingBuffer;
   lastShareTime = Date.now() / 1000;
@@ -35,7 +35,12 @@ export class Miner {
 
   public timedout() {
     const { login, ip } = this.attributes;
-    this.logger.append('warn', 'pool', 'Miner timed out and disconnected %s@%s', [login, ip]);
+    this.logger.append(
+      'warn',
+      'pool',
+      'Miner timed out and disconnected %s@%s',
+      [login, ip]
+    );
   }
   heartbeat() {
     this.lastBeat = Date.now();
@@ -46,13 +51,17 @@ export class Miner {
 
     newDiff = Math.round(newDiff);
     if (difficulty === newDiff) return;
-    this.logger.append('info', 'pool', 'Retargetting difficulty %d to %d for %s', [difficulty, newDiff, login]);
+    this.logger.append(
+      'info',
+      'pool',
+      'Retargetting difficulty %d to %d for %s',
+      [difficulty, newDiff, login]
+    );
     this.attributes.pendingDifficulty = newDiff;
     this.pushMessage('job', this.getJob());
   }
 
   retarget(now: any) {
-
     const { difficulty, options: config, VarDiff } = this.attributes;
     const { varDiff: options } = config.poolServer;
     const sinceLast = now - this.lastShareTime;
@@ -94,9 +103,7 @@ export class Miner {
     return { newDiff, direction };
   }
 
-
   getTargetHex() {
-
     const { diff1, pendingDifficulty } = this.attributes;
     if (pendingDifficulty) {
       this.attributes.lastDifficulty = this.attributes.difficulty;
@@ -122,27 +129,31 @@ export class Miner {
 
   pushMessage(method: string, params: any) {
     this.handler.sendMessage(method, params);
-  };
-
+  }
 
   getJob() {
-
-    const { score, diffHex, difficulty, lastBlockHeight, pendingDifficulty } = this.attributes;
+    const {
+      score,
+      diffHex,
+      difficulty,
+      lastBlockHeight,
+      pendingDifficulty,
+    } = this.attributes;
     const currentBlockTemplate = BlockTemplate.currentBlockTemplate;
 
     if (!currentBlockTemplate) {
       return {
         blob: '',
         job_id: '',
-        target: ''
+        target: '',
       };
     }
 
-    if ((lastBlockHeight === currentBlockTemplate.height) && !pendingDifficulty) {
+    if (lastBlockHeight === currentBlockTemplate.height && !pendingDifficulty) {
       return {
         blob: '',
         job_id: '',
-        target: ''
+        target: '',
       };
     }
 
@@ -157,7 +168,7 @@ export class Miner {
       difficulty,
       score,
       diffHex,
-      submissions: []
+      submissions: [],
     };
 
     this.validJobs.push(newJob);
@@ -168,12 +179,12 @@ export class Miner {
     return {
       blob: blob,
       job_id: newJob.id,
-      target: target
+      target: target,
     };
   }
 
   isValidJob(jobId: string) {
-    const jobs = this.validJobs.filter(function (job: any) {
+    const jobs = this.validJobs.filter(function(job: any) {
       return job.id === jobId;
     });
 
@@ -184,19 +195,35 @@ export class Miner {
     const { ip } = this.attributes;
     MiningServer.perIPStats[ip] = { validShares: 0, invalidShares: 999999 };
     server.checkBan(false, {});
-    this.logger.append('warn', 'pool', heading + ': ' + JSON.stringify(params) +
-      ' from ' + this.getUserAddress(), []);
+    this.logger.append(
+      'warn',
+      'pool',
+      heading +
+        ': ' +
+        JSON.stringify(params) +
+        ' from ' +
+        this.getUserAddress(),
+      []
+    );
   }
 
   getWoker() {
     const { ip, id, login: address } = this.attributes;
     return {
-      id, ip, address
+      id,
+      ip,
+      address,
     };
   }
 
   trustCheck(config: any) {
-    const { shareTrustEnabled, shareAccepted, shareTrustStepFloat, shareTrustMinFloat, penalty } = config;
+    const {
+      shareTrustEnabled,
+      shareAccepted,
+      shareTrustStepFloat,
+      shareTrustMinFloat,
+      penalty,
+    } = config;
     const { login: address, ip, trust } = this.attributes;
     if (shareTrustEnabled) {
       if (shareAccepted) {
@@ -205,11 +232,13 @@ export class Miner {
           trust.probability = shareTrustMinFloat;
         trust.penalty--;
         trust.threshold--;
-      }
-      else {
+      } else {
         trust.probability = 1;
         trust.penalty = penalty;
-        this.logger.append('warn', 'pool', 'Share trust broken by %s@%s', [address, ip]);
+        this.logger.append('warn', 'pool', 'Share trust broken by %s@%s', [
+          address,
+          ip,
+        ]);
       }
     }
   }
@@ -217,18 +246,38 @@ export class Miner {
   getUserAddress() {
     const { ip, login } = this.attributes;
     return ' ' + login + '@' + ip;
-
   }
 
-  async recordShare(redis: RedisClient, coin: string, address: string, job: any, dateNow: number) {
+  async recordShare(
+    redis: RedisClient,
+    coin: string,
+    address: string,
+    job: any,
+    dateNow: number
+  ) {
     const hset = promisify(redis.hset).bind(redis);
     const hincrby = promisify(redis.hincrby).bind(redis);
     const zadd = promisify(redis.zadd).bind(redis);
 
-    await hincrby([coin, 'shares', 'roundCurrent'].join(':'), address, job.score);
-    await hincrby([coin, 'workers', address].join(':'), 'hashes', job.difficulty);
-    await hset([coin, 'workers', address].join(':'), 'lastShare', dateNow / 1000);
-    await zadd([coin, 'hashrate'].join(':'), dateNow / 1000, [job.difficulty, address, dateNow].join(':'));
-
+    await hincrby(
+      [coin, 'shares', 'roundCurrent'].join(':'),
+      address,
+      job.score
+    );
+    await hincrby(
+      [coin, 'workers', address].join(':'),
+      'hashes',
+      job.difficulty
+    );
+    await hset(
+      [coin, 'workers', address].join(':'),
+      'lastShare',
+      dateNow / 1000
+    );
+    await zadd(
+      [coin, 'hashrate'].join(':'),
+      dateNow / 1000,
+      [job.difficulty, address, dateNow].join(':')
+    );
   }
 }

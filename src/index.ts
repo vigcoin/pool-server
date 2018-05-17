@@ -3,9 +3,7 @@ export * from './block-template';
 export * from './miner';
 export * from './socket-handler';
 
-
-import { MiningServer } from "./server";
-
+import { MiningServer } from './server';
 
 export function onMessage(message: any) {
   switch (message.type) {

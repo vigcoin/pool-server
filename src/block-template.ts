@@ -56,7 +56,11 @@ export class BlockTemplate {
     config: any
   ) {
     try {
-      const { result: template } = await BlockTemplate.get(req, config);
+      const { result: template, error } = await BlockTemplate.get(req, config);
+      if (error) {
+        logger.append('error', 'pool', 'Error refreshing: %s', [error.message]);
+        return;
+      }
       if (!BlockTemplate.currentBlockTemplate) {
         logger.append(
           'info',
@@ -75,7 +79,7 @@ export class BlockTemplate {
         BlockTemplate.process(template, logger);
       }
     } catch (e) {
-      logger.append('error', 'pool', 'Error refreshing: %j', [e]);
+      logger.append('error', 'pool', 'Error refreshing: %s', [e]);
       return;
     }
 
@@ -112,7 +116,7 @@ export class BlockTemplate {
     ) {
       return BlockTemplate.currentBlockTemplate;
     }
-    return BlockTemplate.validBlockTemplates.filter(function(t: any) {
+    return BlockTemplate.validBlockTemplates.filter(function (t: any) {
       return t.height === job.height;
     })[0];
   }

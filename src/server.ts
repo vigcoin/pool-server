@@ -180,7 +180,7 @@ export class MiningServer {
       this.logger.append(
         'info',
         'pool',
-        'Started server listening on port %d',
+        '(Thread ' + process.env.forkId + ') Started server listening on port %d',
         [port]
       );
       // } catch (e) {

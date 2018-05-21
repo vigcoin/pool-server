@@ -116,7 +116,7 @@ export class BlockTemplate {
     ) {
       return BlockTemplate.currentBlockTemplate;
     }
-    return BlockTemplate.validBlockTemplates.filter(function (t: any) {
+    return BlockTemplate.validBlockTemplates.filter(function(t: any) {
       return t.height === job.height;
     })[0];
   }

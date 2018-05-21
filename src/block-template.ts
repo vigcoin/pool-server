@@ -43,7 +43,7 @@ export class BlockTemplate {
   }
 
   static async get(req: PoolRequest, config: any) {
-    return req.daemon('/', 'getblocktemplate', {
+    return req.daemon('/json_rpc', 'getblocktemplate', {
       reserve_size: 8,
       wallet_address: config.poolServer.poolAddress,
     });

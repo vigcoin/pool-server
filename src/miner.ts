@@ -132,6 +132,7 @@ export class Miner {
   }
 
   getJob() {
+    console.log(this.attributes);
     const {
       score,
       diffHex,

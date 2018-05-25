@@ -107,7 +107,7 @@ export class Handler {
     if (this.config.poolServer.slushMining.enabled) {
       if (
         lastChecked + this.config.poolServer.slushMining.lastBlockCheckRate <=
-          dateNowSeconds ||
+        dateNowSeconds ||
         lastChecked == 0
       ) {
         try {
@@ -133,17 +133,17 @@ export class Handler {
         Math.pow(
           Math.E,
           (scoreTime - dateNowSeconds) /
-            this.config.poolServer.slushMining.weight
+          this.config.poolServer.slushMining.weight
         ); //Score Calculation
       this.logger.append(
         'info',
         'pool',
         'Submitted score ' +
-          job.score +
-          ' with difficulty ' +
-          job.difficulty +
-          ' and the time ' +
-          scoreTime,
+        job.score +
+        ' with difficulty ' +
+        job.difficulty +
+        ' and the time ' +
+        scoreTime,
         []
       );
     } else {
@@ -170,7 +170,7 @@ export class Handler {
         const workerShares = await hgetall(
           [this.config.coin, 'shares', 'round', job.height].join(':')
         );
-        const totalShares = Object.keys(workerShares).reduce(function(p, c) {
+        const totalShares = Object.keys(workerShares).reduce(function (p, c) {
           return p + parseInt(workerShares[c]);
         }, 0);
 
@@ -308,6 +308,12 @@ export class Handler {
     const job: any = miner.getJob();
     console.log(params, json, job);
     if (!this.checkSubmit(miner, params, json, job)) {
+      this.logger.append(
+        'warn',
+        'pool',
+        'Check job failed!',
+        []
+      );
       return;
     }
 

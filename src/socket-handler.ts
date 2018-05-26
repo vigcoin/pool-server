@@ -107,7 +107,7 @@ export class Handler {
     if (this.config.poolServer.slushMining.enabled) {
       if (
         lastChecked + this.config.poolServer.slushMining.lastBlockCheckRate <=
-        dateNowSeconds ||
+          dateNowSeconds ||
         lastChecked == 0
       ) {
         try {
@@ -133,17 +133,17 @@ export class Handler {
         Math.pow(
           Math.E,
           (scoreTime - dateNowSeconds) /
-          this.config.poolServer.slushMining.weight
+            this.config.poolServer.slushMining.weight
         ); //Score Calculation
       this.logger.append(
         'info',
         'pool',
         'Submitted score ' +
-        job.score +
-        ' with difficulty ' +
-        job.difficulty +
-        ' and the time ' +
-        scoreTime,
+          job.score +
+          ' with difficulty ' +
+          job.difficulty +
+          ' and the time ' +
+          scoreTime,
         []
       );
     } else {
@@ -170,7 +170,7 @@ export class Handler {
         const workerShares = await hgetall(
           [this.config.coin, 'shares', 'round', job.height].join(':')
         );
-        const totalShares = Object.keys(workerShares).reduce(function (p, c) {
+        const totalShares = Object.keys(workerShares).reduce(function(p, c) {
           return p + parseInt(workerShares[c]);
         }, 0);
 
@@ -204,12 +204,16 @@ export class Handler {
     blockTemplate: BlockTemplate,
     params: any
   ) {
+    console.log(params);
     const { nonce, result: resultHash } = params;
     const { login, ip } = miner.attributes;
 
     // nonce: string, resultHash: string
 
     const shareBuffer = blockTemplate.shareBuffer(job, params, this.logger);
+
+    console.log(shareBuffer);
+    console.log(miner.trust);
     let convertedBlob;
     let hash;
     let shareType: any;
@@ -224,9 +228,15 @@ export class Handler {
       shareType = 'trusted';
     } else {
       convertedBlob = cnUtil.convert_blob(shareBuffer);
+      console.log(convertedBlob);
       hash = cryptoNight(convertedBlob);
+      hash = new Buffer(hash, 'hex');
       shareType = 'valid';
     }
+
+    console.log('shareType:' + shareType);
+    console.log('hash:' + hash.toString('hex'));
+    console.log('result:' + resultHash);
 
     if (hash.toString('hex') !== resultHash) {
       this.logger.append('warn', 'pool', 'Bad hash from miner %s@%s', [
@@ -236,7 +246,8 @@ export class Handler {
       return false;
     }
 
-    const hashArray = hash.toJSON();
+    let hashArray = new Buffer(hash.length);
+    hash.copy(hashArray);
     hashArray.reverse();
     const hashNum = bignum.fromBuffer(new Buffer(hashArray));
     const hashDiff = diff1.div(hashNum);
@@ -304,22 +315,17 @@ export class Handler {
 
   async onSubmitJob(miner: Miner, params: any, json: any) {
     miner.heartbeat();
+    const job = this.checkSubmit(miner, params, json);
 
-    const job: any = miner.getJob();
-    console.log(params, json, job);
-    if (!this.checkSubmit(miner, params, json, job)) {
-      this.logger.append(
-        'warn',
-        'pool',
-        'Check job failed!',
-        []
-      );
+    if (!job) {
+      this.logger.append('warn', 'pool', 'Check job failed!', []);
       return;
     }
 
     job.submissions.push(params.nonce);
 
     const blockTemplate = BlockTemplate.getJobTemplate(job);
+
 
     if (!blockTemplate) {
       this.reply(json, 'Block expired', null);
@@ -331,6 +337,7 @@ export class Handler {
       blockTemplate,
       params
     );
+
     this.submit(shareAccepted, miner, json);
   }
 
@@ -441,7 +448,8 @@ export class Handler {
   public changeDiff(login: any, poolServer: any, difficulty: number) {
     // let difficulty = this.difficulty;
     let noRetarget = false;
-    if (poolServer.fixedDiff.enabled) {
+
+    if (poolServer.fixedDiff.enabled && login) {
       const fixedDiffCharPos = login.indexOf(
         poolServer.fixedDiff.addressSeparator
       );
@@ -542,9 +550,12 @@ export class Handler {
     this.reply(json, null, { status: 'OK' });
   }
 
-  public checkSubmit(miner: Miner, params: any, json: any, job: any) {
-    if (!miner.isValidJob(params.job_id)) {
-      this.reply(json, 'Invalid job id', miner.getJob());
+  public checkSubmit(miner: Miner, params: any, json: any) {
+    console.log('inside check job');
+    console.log(params);
+    let job = miner.isValidJob(params.job_id);
+    if (!job) {
+      this.reply(json, 'Invalid job id', params.job_id);
       return false;
     }
     params.nonce = params.nonce.substr(0, 8).toLowerCase();
@@ -552,16 +563,16 @@ export class Handler {
 
     if (!noncePattern.test(params.nonce)) {
       miner.invalidSubmit(params, this.server, 'Malformed nonce');
-      this.reply(json, 'Duplicate share', miner.getJob());
+      this.reply(json, 'Duplicate share', params.job_id);
       return false;
     }
 
-    if (job.submissions.indexOf(params.nonce) !== -1) {
+    if (job.submissions && job.submissions.indexOf(params.nonce) !== -1) {
       miner.invalidSubmit(params, this.server, 'Duplicate share');
       this.reply(json, 'Duplicate share', null);
       return false;
     }
-    return true;
+    return job;
   }
 
   async handleMinerMethod(json: any) {
@@ -636,7 +647,7 @@ export class Handler {
       this.socket.destroy();
       return;
     }
-    if (this.buffer.indexOf('\n') !== -1) {
+    if (this.buffer && this.buffer.indexOf('\n') !== -1) {
       const messages = String(this.buffer).split('\n');
       const incomplete =
         String(this.buffer).slice(-1) === '\n' ? '' : messages.pop();
@@ -648,11 +659,11 @@ export class Handler {
         try {
           jsonData = JSON.parse(message);
         } catch (e) {
-          if (message.indexOf('GET /') === 0) {
-            if (message.indexOf('HTTP/1.1') !== -1) {
+          if (message && message.indexOf('GET /') === 0) {
+            if (message && message.indexOf('HTTP/1.1') !== -1) {
               this.socket.end('HTTP/1.1' + Handler.httpResponse);
               break;
-            } else if (message.indexOf('HTTP/1.0') !== -1) {
+            } else if (message && message.indexOf('HTTP/1.0') !== -1) {
               this.socket.end('HTTP/1.0' + Handler.httpResponse);
               break;
             }

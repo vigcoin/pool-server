@@ -63,7 +63,8 @@ export class Miner {
 
   retarget(now: any) {
     const { difficulty, options: config, VarDiff } = this.attributes;
-    const { varDiff: options } = config.poolServer;
+    console.log(config);
+    const { varDiff: options } = config;
     const sinceLast = now - this.lastShareTime;
     const decreaser = sinceLast > VarDiff.tMax;
     const avg = this.shareTimeRing.avg(decreaser ? sinceLast : 0);
@@ -185,11 +186,13 @@ export class Miner {
   }
 
   isValidJob(jobId: string) {
+    console.log('is valid job');
+    console.log(this.validJobs);
     const jobs = this.validJobs.filter(function(job: any) {
       return job.id === jobId;
     });
 
-    return jobs.length;
+    return jobs[0];
   }
 
   invalidSubmit(params: any, server: MiningServer, heading: string) {

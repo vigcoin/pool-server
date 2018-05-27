@@ -326,7 +326,6 @@ export class Handler {
 
     const blockTemplate = BlockTemplate.getJobTemplate(job);
 
-
     if (!blockTemplate) {
       this.reply(json, 'Block expired', null);
       return;
